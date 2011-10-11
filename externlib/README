@@ -1,0 +1,12 @@
+README
+
+ Created on: Jun 16, 2011
+     Author: ali
+  
+For reading program parameters TinyXML library has bee replaced for
+the previous one used by Andreas (which is not available now). You
+should define the the macro "TIXML_USE_TICPP" when compiling library.
+g++ .... -DTIXML_USE_TICPP
+
+
+

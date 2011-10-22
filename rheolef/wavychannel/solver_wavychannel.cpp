@@ -36,6 +36,9 @@
 #include "analytic_straightchannel.h"
 //adaptiveStrategy adapt_strategy;
 //int i_adapt = 0;
+#include "FieldVisualization.h"
+//ali 21 Oct 2011
+#include "Restart.h"
 
 using namespace rheolef;
 
@@ -63,6 +66,10 @@ solver_wavychannel::solver_wavychannel( char const* filename )
     cout << "\t==========================================\n"
     	 << "\t|Constructor Wavychennel                 |\n"
 	 << "\t==========================================" << endl;
+
+    Restart R("restart");
+    if( R.restart_file_exists() )
+        restart(R);
 
     _timestep=0;
     _timereal=0.;
@@ -546,6 +553,10 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
       path_t path[] = {"SolverViscoplastic","tolerance"};
       get_from_xml(path, &tolerance);
     }
+    //added by ali 16 Oct 2011
+    monitors["uL2"].clear();
+    monitors["gL2"].clear();
+
     //added by ali 7 Jul 2011
 //    tolerance = adapt_strategy.gamma_tol(i_adapt);
 
@@ -603,7 +614,7 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
 				 << "\t| \t  (c_h.bu).nrow = " << FEforms["c"].bu.nrow() << ", (c_h.bu).col  = " << FEforms["c"].bu.ncol() << endl
 				 << "\t| \t  (c_h.bb).nrow = " << FEforms["c"].bb.nrow() << ", (c_h.bb).col  = " << FEforms["c"].bb.ncol() << endl;
 			//cout << plotmtv << c_h;
-		}	
+		}
 
 	// ------------------------------------------------------------------
 
@@ -1228,12 +1239,7 @@ void solver_wavychannel::adapt_grid()
 		  get_from_xml(path, &criteria);
 		}
 		adapt_option_type options;
-//#		xmlparam->get_childelement_stream("FluidProperties/Bn") >> Bn;
-//#		xmlparam->get_childelement_stream("gridadaption/max_vertices") >> options.n_vertices_max;
-//#		xmlparam->get_childelement_stream("gridadaption/bamg_options/hcoef") >> options.hcoef;
-//#		xmlparam->get_childelement_stream("gridadaption/bamg_options/hmin") >> options.hmin;
-//#		xmlparam->get_childelement_stream("gridadaption/bamg_options/hmax") >> options.hmax;
-//#		xmlparam->get_childelement_stream("gridadaption/bamg_options/hratio") >> options.ratio;
+
 		{
 		  path_t path[] = {"FluidProperties","Bn"};
 		  get_from_xml(path, &Bn);
@@ -1477,6 +1483,20 @@ void solver_wavychannel::write_fields(const string& name )
         m << '\n';
     }
     m.close();
+
+    rheolef::point p1(0.,0.);
+    rheolef::point p2(0.,3.);
+    SegmentedLine sline( p1, p2, 10, FEfields["p"].get_geo() );
+    Field1D<rheolef::Float> p( sline, FEfields["p"] );
+    Field1D<rheolef::tensor> tau( sline, FEfields["T"] );
+    Field1D<rheolef::tensor> gam( sline, FEfields["gamma"] );
+    TPGammaRecord r;
+    r.P = &p;
+    r.T = &tau;
+    r.Gam = &gam;
+
+    write2file("new.data",sline,r);
+
 
 }
 
@@ -1935,3 +1955,19 @@ int solver_wavychannel::Stokes_Piccard(bool updateprecond, Float reg)
 			<< "\t\t ---------------------------------------------" << endl;
 	return 1;
 }
+
+
+//ali 21 Oct 2011
+void solver_wavychannel::restart( Restart& restarter )
+{
+  std::ifstream info("restart_info");
+  assert( info.is_open() );
+  info >> _adaptstep;
+
+  load_xml_file();
+  set_basename();
+
+  read_restart_field("p",restarter);
+  read_restart_field("T",restarter);
+}
+

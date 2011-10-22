@@ -1,2 +1,6 @@
 putza@stir.math.ubc.ca
 rhpu05tza
+
+in xml config file:
+-for symxy geometry:
+ <subdivisions_top>100</subdivisions_top> creates 50 divison on top of the half geometry

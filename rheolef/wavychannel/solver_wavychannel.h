@@ -48,6 +48,9 @@
 #include "SimpleXML.h"
 class TiXmlElement;
 
+//added by ali 21 Oct 2011
+#include "Restart.h"
+
 #define EPS 1e-25
 
 using namespace std;
@@ -208,6 +211,10 @@ private:
         bool path_exist( path_t (&path)[depth] );
         template< int depth >
         string get_string( path_t (&path)[depth] );
+        //added by ali 21 Oct 2011
+        void restart( Restart& restarter );
+        void read_restart_field( const std::string& name, Restart& restarter )
+        {restarter.read_field( name, FEfields[name] );}
 //	XMLParser*  xmlparam;
 	//parameters params;
 

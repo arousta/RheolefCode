@@ -48,7 +48,6 @@ void solver_wavychannel::load_xml_file( )
     cout << "Can not load the file " << xml_filename << endl;
     exit(1);
   }
-
   parameters = xmldoc->RootElement()->FirstChildElement("parameters");
 }
 
@@ -62,26 +61,40 @@ solver_wavychannel::solver_wavychannel( char const* filename )
 ,parameters(0) /*added by ali 16 Jun 2011*/
 ,xml_filename(filename)
 ,xmldoc( new TiXmlDocument )
+,restart_file("restart_info") //ali 24 Oct 2011
+,uzawa_iter_restart(0)
+,is_a_restart(false)
 {
     cout << "\t==========================================\n"
     	 << "\t|Constructor Wavychennel                 |\n"
 	 << "\t==========================================" << endl;
 
-    Restart R("restart");
-    if( R.restart_file_exists() )
-        restart(R);
+    //added by ali 14 Jun 2011
+    load_xml_file();
+    set_basename();
+
+    //ali 25 Oct 2011
+    {
+      path_t path[] = { "SolverViscoplastic", "restart_save_period" };
+      double period;
+      get_from_xml(path,&period);
+      _restart.set_restart_saving_period(period);
+    }
+    if( Restart::restart_file_exists(restart_file) ){
+        cout << "\t|\n"
+             << "\t| Restart file found. Continueing from last save...\n"
+             << "\t|@ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @ @" << endl;
+        is_a_restart = true;
+        restart();
+        return;
+    }
+
 
     _timestep=0;
     _timereal=0.;
     _adaptstep=0;
 
-    //added by ali 14 Jun 2011
-    load_xml_file();
-//    string velspace;
-
-    set_basename();
     FE_initialize();
-
 
 	//added by ali 15 Jun 2011
 	//xmlparam->get_childelement_string("SolverViscoplastic/type")
@@ -165,8 +178,6 @@ void solver_wavychannel::FE_initialize_geo()
 	if (_adaptstep == 0)
 	{
             cout << "\t| - Initialize GEO ... \n";
-            //irheostream geostream(_basename,"geo");
-            //omega_h = geo(_basename+".geo");
             omega_h = geo(_geoname+".geo");
             cout << "\t|    *done\n"
                  << "\t-------------------------------------------" << endl;
@@ -186,10 +197,6 @@ int solver_wavychannel::FE_initialize_spaces()
     string velspace,pspace,tspace;
     cout << "\t| - Setup spaces ..." << endl;
 
-    //added by ali 12 Jun 2011
-//#    xmlparam->get_childelement_stream("SolverViscoplastic/FE_VelocitySpace") >> velspace;
-//#    xmlparam->get_childelement_stream("SolverViscoplastic/FE_PressureSpace") >> pspace;
-//#    xmlparam->get_childelement_stream("SolverViscoplastic/FE_StressSpace") >> tspace;
     //added by ali 15 Jun 2011
     {
       path_t path[] = {"SolverViscoplastic","FE_VelocitySpace"};
@@ -211,8 +218,6 @@ int solver_wavychannel::FE_initialize_spaces()
     Th = space(omega_h,tspace,"tensor");
 
     string geom;
-    //added by ali 12 Jun 2011
-//#    xmlparam->get_childelement_stream("mesh/geom") >> geom;
     //added by ali 15 Jun 2011
     {
       path_t path[] = {"mesh","geom"};
@@ -514,13 +519,6 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
     int iter_uzawa_max;
     bool isflowrate = false;
     string stokes_alg;
-    //added by ali 12 Jun 2011
-//#    xmlparam->get_childelement_stream("SolverViscoplastic/augment") >> r_Bi;
-//#    xmlparam->get_childelement_stream("FluidProperties/Bn") >> Bn;
-//#    xmlparam->get_childelement_stream("SolverViscoplastic/iterations") >> iter_uzawa_max;
-//#    xmlparam->get_childelement_stream("StokesSolver/type") >> stokes_alg;
-//#    xmlparam->get_childelement_stream("mesh/height") >> ywall;
-//#    xmlparam->get_childelement_stream("mesh/amplitude") >> amplitude;
 //#    xmlparam->get_childelement_stream("SolverViscoplastic/tolerance") >> tolerance;
     //added by ali 15 Jun 2011
     {
@@ -553,16 +551,28 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
       path_t path[] = {"SolverViscoplastic","tolerance"};
       get_from_xml(path, &tolerance);
     }
-    //added by ali 16 Oct 2011
-    monitors["uL2"].clear();
-    monitors["gL2"].clear();
+    //ali 25 Oct 2011
+    int nreport;
+    {
+      path_t path[] = {"SolverViscoplastic","nreport"};
+      get_from_xml(path,&nreport);
+    }
 
     //added by ali 7 Jul 2011
 //    tolerance = adapt_strategy.gamma_tol(i_adapt);
 
+    //ali 24 Oct 2011
+     if( is_a_restart )
+     {
+         iter_uzawa = uzawa_iter_restart;
+         //set to false for later mesh adaption iterations
+         is_a_restart = false;
+     }
+     tol = 1.e3;
+
     //xmlparam->parse_childelement("subproblem")
     path_t subproblem_PT[] = {"subproblem"};
-    if (path_exist(subproblem_PT))
+    if (path_exist(subproblem_PT) && (0==uzawa_iter_restart) ) //ali 24 Oct 2011
     {
         string subproblem;
         //added by ali 15 Jun 2011
@@ -577,13 +587,8 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
                 isflowrate=true;
                 // Erase all unnecessary entries from the flowrate and the dPdL entry
                 // in the monitor:
-                if (monitors["dPdL"].size()>2){
+                if (monitors["dPdL"].size()>2)
                         monitors["dPdL"].erase(monitors["dPdL"].begin(),monitors["dPdL"].end()-2);
-                        cout << "~~~~~~~~~~~~~~~~~~~~~~~~~~~~dPdL is:\n";
-                        for( size_t i=0; i<monitors["dPdL"].size(); ++i )
-                            cout << monitors["dPdL"][i] << '\n';
-                        cout << endl;
-                }
                 if (monitors["flowrate"].size()>2)
                         monitors["flowrate"].erase(monitors["flowrate"].begin(),monitors["flowrate"].end()-2);
         }
@@ -623,12 +628,10 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
 	// ===========================================================
 	
 	// analytic_solution(amplitude, Bn, ywall , dPdL_current);
-
-
-
-	
 	// plot_fields("Fields before Uzawa iteration");
-	iter_uzawa = 0;
+
+	//ali 25 Oct 2011
+	_restart.start_time_monitor();
     do 
     {
         cout << "\t|   * timestep = " << _timestep 
@@ -720,27 +723,31 @@ void solver_wavychannel::ALG_Uzawa_test( Float Lambda )
 			}
 		// Convergence:
 		//added by ali 6 Jul 2011
-		if( iter_uzawa%100==0 )
+		if( iter_uzawa%nreport==0 )
 		  {
 		FEfields["secinv_gammadot"]=secinv(FEfields["gammadot"]);
 		FEfields["secinv_gamma"]=secinv(FEfields["gamma"]);
 		Float tolu = norm(multifield(FEfields["u"]-oldu),"L2");
 		Float toldgamma = norm(multifield(FEfields["secinv_gamma"]-FEfields["secinv_gammadot"]),"L2");
-		tol=max(tolu,toldgamma);
+		tol = max(tolu,toldgamma);
 		//added by ali 1 Aug 2011
 		monitors["uL2"].push_back(tolu);
 		monitors["gL2"].push_back(toldgamma);
 
-		cout << "\t\t    ||u-oldu||_L2           = " << tolu << endl
-			 << "\t\t    ||gamma-gammadot||_L2   = " << toldgamma << endl;
+		cout << "\t\t    ||u-oldu||_L2           = " << tolu      << endl
+		     << "\t\t    ||gamma-gammadot||_L2   = " << toldgamma << endl;
 		  }
+
+		//ali 24 Oct 2011
+		if( _restart.time_to_save_for_restart() )
+		{
+                    write_restart_files(iter_uzawa+1);
+		}
+
 		iter_uzawa++;
-//		sleep(4);
     }while(iter_uzawa<=iter_uzawa_max && tol > tolerance);
 	
-//	plot_fields("Field Output after all Uzawa steps");
-	//string tt;
-	//cin >> tt;
+//      plot_fields("Field Output after all Uzawa steps");
 }
 
 /*!
@@ -1326,7 +1333,11 @@ void solver_wavychannel::adapt_grid()
     _adaptstep++;
 	
 
+	//ali 22 Oct 2011
+	//save geo with full precision for restart
+        omega_h.use_double_precision_in_saving();
 	omega_h.save();
+
 	_geoname = omega_h.name();
 	cout 	<< "* - gemotry saved" << endl;
 
@@ -1362,6 +1373,11 @@ void solver_wavychannel::adapt_grid()
                 cout    << "* - Reinterpolated Tau onto adapted mesh " << endl;
 	}		
 	cout << "**************************************************" << endl << endl;
+
+	//ali 25 Oct 2011
+	//save for restart
+	write_restart_files(0);
+
 }
 
 void solver_wavychannel::set_basename()
@@ -1374,31 +1390,19 @@ void solver_wavychannel::set_basename()
     get_from_xml(path, &_basename);
   }
 
+   _geoname = _basename;
+   _dataname =_basename;
+
+   cout << "\t Set basename to : " << _basename << endl;
   // Setup of the extensoin
+  /* commented by ali 23 Oct 2011
     if (_timestep !=  0.)
     {
         char tmp[100];
         sprintf(tmp,"_rtime=%e",_timereal);
         _basename.append(tmp);
     }
-	_geoname = _basename;
-	_dataname =_basename;
-	
-// 	map<string, Float>::iterator iter;
-// 	for (iter = _filenamecounters.begin(); iter != _filenamecounters.end(); iter++)
-// 	{
-// 		_dataname = _dataname + "_" + iter->first + "=";
-// 		char tmp[100];
-//         sprintf(tmp,"%3.3d",);
-// 	}
-// 	
-//     if (_adaptstep >= 0 )
-//     {
-//         char tmp[100];
-//         sprintf(tmp,"_adapt=%3.3d",_adaptstep);
-//         _geoname.append(tmp);
-//     }
-    cout << "\t Set basename to : " << _basename << endl;
+    */
 }
 
 
@@ -1483,21 +1487,26 @@ void solver_wavychannel::write_fields(const string& name )
         m << '\n';
     }
     m.close();
-
-    rheolef::point p1(0.,0.);
-    rheolef::point p2(0.,3.);
-    SegmentedLine sline( p1, p2, 10, FEfields["p"].get_geo() );
-    Field1D<rheolef::Float> p( sline, FEfields["p"] );
-    Field1D<rheolef::tensor> tau( sline, FEfields["T"] );
-    Field1D<rheolef::tensor> gam( sline, FEfields["gamma"] );
-    TPGammaRecord r;
-    r.P = &p;
-    r.T = &tau;
-    r.Gam = &gam;
-
-    write2file("new.data",sline,r);
+    // ali 23 Oct 2011
+    monitors["uL2"].clear();
+    monitors["gL2"].clear();
 
 
+//    orheostream oo("restart","mfield");
+//    oo << catchmark("p") << FEfields["p"];
+//    oo.close();
+//    rheolef::point p1(0.,0.);
+//    rheolef::point p2(0.,3.);
+//    SegmentedLine sline( p1, p2, 10, FEfields["p"].get_geo() );
+//    Field1D<rheolef::Float> p( sline, FEfields["p"] );
+//    Field1D<rheolef::tensor> tau( sline, FEfields["T"] );
+//    Field1D<rheolef::tensor> gam( sline, FEfields["gamma"] );
+//    TPGammaRecord r;
+//    r.P = &p;
+//    r.T = &tau;
+//    r.Gam = &gam;
+//
+//    write2file("new.data",sline,r);
 }
 
 
@@ -1526,7 +1535,7 @@ void solver_wavychannel::solve()
 {
 	cout 	<< "\t==========================================\n"
     		<< "\t|Solver method                           |\n" 
-			<< "\t==========================================" << endl;
+    		<< "\t==========================================" << endl;
     int adapt_max=0;
 
     //added by ali 12/15 Jun 2011
@@ -1535,15 +1544,17 @@ void solver_wavychannel::solve()
     get_from_xml( gridadap_steps_PT, &adapt_max );
 
     cout	<< "\t| - Gridadaption steps = " << adapt_max << endl;
+
+    assert( _adaptstep==0 );
+    adapt_max -= _adaptstep;
+
     for (int i=0; i<= adapt_max; i++)
     {
         string algorithm;
         //added by ali 12/15 Jun 2011
-//#        xmlparam->get_childelement_stream("SolverViscoplastic/type") >> algorithm;
         path_t solverVisc_type_PT[] = {"SolverViscoplastic","type"};
         get_from_xml( solverVisc_type_PT, &algorithm );
 
-        //xmlparam->get_childelement_string("SolverViscoplastic/Model")
         std::string str_SolverViscoplastic_Model;
         path_t solverVisc_model_PT[] = {"SolverViscoplastic","Model"};
         get_from_xml( solverVisc_model_PT, &str_SolverViscoplastic_Model );
@@ -1957,17 +1968,86 @@ int solver_wavychannel::Stokes_Piccard(bool updateprecond, Float reg)
 }
 
 
-//ali 21 Oct 2011
-void solver_wavychannel::restart( Restart& restarter )
+void solver_wavychannel::write_restart_files( const int niter )
 {
-  std::ifstream info("restart_info");
+  cout << "\t--------------------------------------------------------------------\n"
+       << "\t|                        Saving for restart                         |"
+       << endl;
+
+  const size_t N = 10;
+  if( N<monitors["dPdL"].size() )
+        monitors["dPdL"].erase(monitors["dPdL"].begin(),monitors["dPdL"].end()-N);
+  if( N<monitors["flowrate"].size() )
+        monitors["flowrate"].erase(monitors["flowrate"].begin(),monitors["flowrate"].end()-N);
+
+  std::ofstream o(restart_file);
+  o << _adaptstep; o << '\n';
+  o << niter; o << '\n';
+  save_monitors(o);
+  o.close();
+
+  orheostream f("restart","mfield");
+  f << setprecision( std::numeric_limits<Float>::digits10 );
+  f << catchmark("u")     << FEfields["u"];
+  f << catchmark("T")     << FEfields["T"];
+  f << catchmark("gamma") << FEfields["gamma"];
+  f.close();
+  cout << "\t---------------------------------------------------------------------"
+       << endl;
+}
+
+void solver_wavychannel::save_monitors( std::ofstream& o )
+{
+  o << setprecision( std::numeric_limits<Float>::digits10 );
+  Restart::save_std_vector( monitors["dPdL"], o, "dPdL" );
+  Restart::save_std_vector( monitors["flowrate"], o, "flowrate" );
+  Restart::save_std_vector( monitors["uL2"], o, "uL2" );
+  Restart::save_std_vector( monitors["gL2"], o, "gL2" );
+  o.close();
+}
+
+void solver_wavychannel::load_monitors( std::ifstream& i )
+{
+  assert( i.is_open() );
+  Restart::load_std_vector( monitors["dPdL"], i );
+  Restart::load_std_vector( monitors["flowrate"], i );
+  Restart::load_std_vector( monitors["uL2"], i );
+  Restart::load_std_vector( monitors["gL2"], i );
+}
+
+
+//ali 21 Oct 2011
+void solver_wavychannel::restart( )
+{
+  std::ifstream info(restart_file);
   assert( info.is_open() );
   info >> _adaptstep;
+  info >> uzawa_iter_restart;
+  load_monitors(info);
+  info.close();
 
-  load_xml_file();
-  set_basename();
+  if( 0==_adaptstep )
+    omega_h = geo(_basename+".geo");
+  else {
+    omega_h = geo(_basename+"-"+itos(_adaptstep)+".geo");
+    omega_h.set_name(_basename);
+    omega_h.data().set_serial_number(_adaptstep);
+  }
 
-  read_restart_field("p",restarter);
-  read_restart_field("T",restarter);
+  FE_initialize_spaces();
+  FE_initialize_forms();
+  FE_initialize_fields();
+
+  irheostream i("restart","mfield");
+  if(!i){
+      cout << "Can not open restart file!---------------------\n";
+      exit(0);
+  }
+  //note the order of reading should be the
+  //same as what used when writing the file
+  i >> catchmark("u")     >> FEfields["u"];
+  i >> catchmark("T")     >> FEfields["T"];
+  i >> catchmark("gamma") >> FEfields["gamma"];
+  i.close();
 }
 

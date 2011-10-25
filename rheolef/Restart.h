@@ -13,32 +13,62 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <ctime>
 
 
 class Restart
 {
 public:
-  Restart( const std::string& fname )
-  {restart_file = fname;}
+  static bool restart_file_exists( const std::string& fname )
+  {return rheolef::file_exists(fname);}
 
-  bool restart_file_exists() const
-  {return rheolef::file_exists(restart_file+".mfield.gz");}
+  void set_restart_saving_period( double p )
+  {saving_period = p;}
 
-  void read_field( const std::string& mark, rheolef::field& f )
+  template< typename T >
+  static void save_std_vector( const std::vector<T>& v, std::ofstream& o, const std::string& name )
   {
-    in.open(restart_file,"mfield");
-    in >> std::setprecision(std::numeric_limits<rheolef::Float>::digits10);
-    in >> rheolef::catchmark(mark);
-    in >> f;
-    in.close();
+    o << '\n';
+    o << name;
+    o << '\n';
+    o << v.size();
+    o << "\n\n";
+    for( size_t i=0; i<v.size(); ++i ){
+        o<<v[i];
+        o<<'\n';
+    }
   }
 
-  void finish()
-  {in.close();}
+  template< typename T >
+  static void load_std_vector( std::vector<T>& v, std::ifstream& in )
+  {
+    std::string tmp;
+    in >> tmp;
+    size_t n;
+    in >> n;
+    assert( 0<=n );
+    v.resize(n);
+    for( size_t i=0; i<n; ++i )
+        in >> v[i];
+  }
+
+  bool time_to_save_for_restart()
+  {
+    std::time(&now);
+    double dt = std::difftime(now,last_time);
+    const bool reached = ( saving_period*3600<=dt );
+    if( reached )
+      last_time = now;
+    return reached;
+  }
+
+  void start_time_monitor()
+  {std::time(&last_time);}
 
 private:
-  rheolef::irheostream in;
-  std::string restart_file;
+  std::time_t last_time;
+  std::time_t now;
+  double saving_period;
 };
 
 

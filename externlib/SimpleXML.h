@@ -65,7 +65,7 @@ template< class T, int depth >
 inline void
 get_value( path_t (&path)[depth], TiXmlElement const* elm, T*const x )
 {
-//  error_if_path_is_unvalid(path,elm);
+  error_if_path_is_unvalid(path,elm);
 
   for( int i=0; i<depth; ++i )
       elm = elm->FirstChildElement( path[i] );

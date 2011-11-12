@@ -2,7 +2,6 @@
  * @file FieldVisualization.h
  * @date Oct 18, 2011
  * @author ali
- *
  */
 
 #ifndef FIELDVISUALIZATION_H_
@@ -12,11 +11,42 @@
 #include "rheolef/point.h"
 
 #include <iostream>
+#include <cstdio>
 #include <vector>
 #include <cassert>
 #include <string>
+#include <sstream>
 
 const int Dim(2);
+
+inline void exec_shell( const std::string& command )
+{
+  printf("execute: %s\n",command.c_str());
+  int status = system(command.c_str());
+}
+
+class GeoGauge
+{
+public:
+  GeoGauge( const rheolef::geo& _Th )
+  {set_geo(_Th);}
+
+  void set_geo( const rheolef::geo& _Th )
+  {
+    Th = &_Th;
+    Th->init_localizer( Th->boundary() );
+  }
+
+  bool is_point_inside_geo( const rheolef::point& p ) const
+  {
+    rheolef::field::size_type tmp;
+    return( Th->localize(p,tmp) );
+  }
+
+private:
+  rheolef::geo const* Th;
+};
+
 
 class SegmentedLine
 {
@@ -26,24 +56,35 @@ public:
     beg(_beg)
    ,end(_end)
    ,n(_n)
+   ,gauge(Th)
+  {
+    create_line(_beg,_end,_n);
+  }
+
+  void create_line( const Point& beg, const Point& end, const int n )
   {
     assert(1<n);
+    points.clear();
     const Point d( (end-beg)/(n-1) );
-    Th.init_localizer( Th.boundary() );
+    dl = norm(d);
     Point p(beg);
     for( int i=0; i<n; ++i )
     {
-        //test if point is inside mesh
-        rheolef::field::size_type tmp;
-        if( !Th.localize(p,tmp) )
+        if( gauge.is_point_inside_geo(p) )
+          points.push_back(p);
+        else
         {
-          std::cerr << "out of meshhss\n";
-          continue;
+          std::cout << "point (";
+          p.put(std::cout,Dim);
+          std::cout << ") out of mesh\n";
         }
-        points.push_back(p);
         p += d;
     }
+    std::cout << std::endl;
   }
+
+  const rheolef::Float spacing() const
+  {return dl;}
 
   size_t size() const
   {return points.size();}
@@ -51,11 +92,30 @@ public:
   const Point& point( size_t i ) const
   {return points[i];}
 
+  void erase( std::vector<size_t>& c )
+  {
+    assert( c.size()<size() );
+
+    std::vector<bool> erase_flag( size(), false );
+    for( size_t i=0; i<c.size(); ++i )
+        erase_flag[ c[i] ] = true;
+
+    std::vector<Point> tmp;
+    for( size_t i=0; i<size(); ++i ){
+        if( !erase_flag[i] )
+          tmp.push_back( points[i] );
+    }
+    assert( tmp.size()==size()-c.size() );
+    points = tmp;
+  }
+
 private:
+  int n;
   Point beg;
   Point end;
+  double dl;
   std::vector<Point> points;
-  int n;
+  GeoGauge gauge;
 };
 
 
@@ -64,36 +124,106 @@ class Field1D
 {
   SegmentedLine const* line;
   std::vector<FieldType> val;
-public:
-  Field1D( const SegmentedLine& _line, const rheolef::field& f )
-  {create(_line,f);}
 
-  void create( const SegmentedLine& _line, const rheolef::field& f )
+public:
+  Field1D()
+  {}
+
+  template< typename Evaluator >
+  Field1D( const SegmentedLine& _line, const rheolef::field& f, Evaluator& E )
+  {create(_line,f,E);}
+
+  template< typename Evaluator >
+  void create( const SegmentedLine& _line, const rheolef::field& f, Evaluator& E )
   {
     line = &_line;
     val.resize( line->size() );
-    for( size_t i=0; i<line->size(); ++i ){
-        f.evaluate( line->point(i), val[i] );
-    }
+    for( size_t i=0; i<line->size(); ++i )
+        E( line->point(i), f, val[i] );
   }
+
+  const FieldType& at( size_t i ) const
+  {return val[i];}
 
   const FieldType& operator()( size_t i ) const
   {return val[i];}
 };
 
 
-template< typename T >
-void extract_field_values_on_line(
-                     const rheolef::field& f
-                    ,const SegmentedLine& sline
-                    ,std::vector<T>& result
-                    )
+
+struct FieldEvaluator
 {
-  result.resize( sline.size() );
-  for( size_t i=0; i<sline.size(); ++i ){
-      f.evaluate( sline.point(i), result[i] );
+  template< typename FieldType >
+  void operator()( const rheolef::point& p, const rheolef::field& f, FieldType& val ) const
+  {f.evaluate(p,val);}
+};
+
+
+template< typename T >
+struct MTinyVector
+{
+  const T& operator()( int i ) const
+  {return d[i];}
+
+  T& operator()( int i )
+  {return d[i];}
+
+private:
+  T d[Dim];
+};
+
+
+struct GradEvaluator
+{
+  GradEvaluator( rheolef::Float _dl ):
+    dl(_dl)
+   ,dx( rheolef::point(_dl/2.,0.) )
+   ,dy( rheolef::point(0.,_dl/2.) )
+  {}
+
+  template< typename FieldType >
+  void operator()( const rheolef::point& p, const rheolef::field& f, MTinyVector<FieldType>& val ) const
+  {
+    val(0) = diffcenter<FieldType>(f,p,dx)/dl;
+    val(1) = diffcenter<FieldType>(f,p,dy)/dl;
   }
-}
+
+  void remove_unvalid_points_of_line( SegmentedLine& line, const rheolef::geo& Th ) const
+  {
+    GeoGauge gauge(Th);
+    std::vector<size_t> erase_flag;
+    for( size_t i=0; i<line.size(); ++i )
+    {
+        const rheolef::point& p( line.point(i) );
+        if(
+            !(
+              gauge.is_point_inside_geo(p+dx) && gauge.is_point_inside_geo(p-dx)
+                                              &&
+              gauge.is_point_inside_geo(p+dy) && gauge.is_point_inside_geo(p-dy)
+            )
+          )
+          {
+            std::printf("point i=%3u to be removed\n",i);
+            erase_flag.push_back(i);
+          }
+    }
+    line.erase( erase_flag );
+  }
+
+private:
+  template< typename FieldType >
+  const FieldType& diffcenter( const rheolef::field& f, const rheolef::point& r, const rheolef::point& dr ) const
+  {
+    FieldType fpr, fmr;
+    f.evaluate(r-dr,fmr);
+    f.evaluate(r+dr,fpr);
+    return( fpr-fmr );
+  }
+
+  rheolef::Float dl;
+  rheolef::point dx;
+  rheolef::point dy;
+};
 
 
 template< typename DataType >
@@ -104,14 +234,11 @@ template<>
 class GnuPlotWriter<rheolef::Float>
 {
 public:
-//  GnuPlotWriter( const char* _name ):
-//    name(_name)
-//  {}
   static void write( std::ostream& o, const rheolef::Float val )
   {o<<' '; o<<val;}
 
   static void write_header( std::ostream& o, const std::string& name )
-  {o<<" "; o<<name;}
+  {o<<' '; o<<name;}
 };
 
 
@@ -129,7 +256,6 @@ public:
     o<<name+'y';
   }
 };
-
 
 
 template<>
@@ -159,14 +285,36 @@ private:
 };
 
 
+template<>
+template< typename FieldType >
+class GnuPlotWriter<MTinyVector<FieldType> >
+{
+public:
+  typedef GnuPlotWriter<FieldType> basewriter;
+
+  static void write( std::ostream& o, const MTinyVector<FieldType>& val )
+  {
+    for( int i=0; i<Dim; ++i )
+        basewriter::write(o,val(i));
+  }
+
+  static void write_header( std::ostream& o, const std::string& name )
+  {
+    std::string str[Dim] = { "X", "Y" };
+    for( int i=0; i<Dim; ++i )
+      basewriter::write_header(o,name+str[i]);
+  }
+};
+
+
 template< typename Record >
 void write2file(
-    const char* fname
+    const std::string& fname
    ,const SegmentedLine& line
    ,const Record& rc
    )
 {
-  std::ofstream o(fname);
+  std::ofstream o(fname.c_str());
   o <<"# x  y ";
   rc.write_header(o);
   o<<'\n';
@@ -181,26 +329,122 @@ void write2file(
 }
 
 
-struct TPGammaRecord
+struct TPVGammaRecord
 {
+  TPVGammaRecord()
+  {}
+
   typedef GnuPlotWriter<rheolef::tensor> twriter;
   typedef GnuPlotWriter<rheolef::Float>  swriter;
-  Field1D<rheolef::tensor> const* T;
-  Field1D<rheolef::Float>  const* P;
-  Field1D<rheolef::tensor> const* Gam;
+  typedef GnuPlotWriter<rheolef::point>  vwriter;
+
+  typedef GnuPlotWriter<MTinyVector<rheolef::Float> >  sswriter;
+  typedef GnuPlotWriter<MTinyVector<rheolef::point> >  vvwriter;
+  typedef GnuPlotWriter<MTinyVector<rheolef::tensor> > ttwriter;
+
+  Field1D<rheolef::Float>   P;
+  Field1D<rheolef::point>   V;
+  Field1D<rheolef::tensor>  T;
+  Field1D<rheolef::tensor>  Gam;
+
+  Field1D<MTinyVector<rheolef::Float> >   GP;
+  Field1D<MTinyVector<rheolef::point> >   GV;
+  Field1D<MTinyVector<rheolef::tensor> >  GT;
+  Field1D<MTinyVector<rheolef::tensor> >  GGam;
 
   void write_header( std::ostream& o ) const
   {
     swriter::write_header(o,"P");
+    vwriter::write_header(o,"V");
     twriter::write_header(o,"Tau");
     twriter::write_header(o,"Gamma");
+
+    sswriter::write_header(o,"P");
+    vvwriter::write_header(o,"V");
+    ttwriter::write_header(o,"Tau");
+    ttwriter::write_header(o,"Gamma");
   }
 
   void write( std::ostream& o, size_t i ) const
   {
-    swriter::write( o, (*P)(i) );
-    twriter::write( o, (*T)(i) );
-    twriter::write( o, (*Gam)(i) );
+    swriter::write( o, P(i) );
+    vwriter::write( o, V(i) );
+    twriter::write( o, T(i) );
+    twriter::write( o, Gam(i) );
+
+    sswriter::write(o, GP(i) );
+    vvwriter::write(o, GV(i) );
+    ttwriter::write(o, GT(i) );
+    ttwriter::write(o, GGam(i) );
+  }
+
+  static void gen_gnuplot_script( const std::string& basename, const std::string& script )
+  {
+    const std::string& gnuplot = basename+".gnu";
+    std::cout << "generating plot script... " << gnuplot;
+    std::ofstream o(gnuplot.c_str());
+    o << script;
+    o.close();
+    std::cout << " done\n";
+  }
+
+  static std::string datafile( const std::string& basename )
+  {return basename+".dat";}
+
+  static void viz1( const std::string& basename, const std::string& title )
+  {
+    const std::string& fname = datafile(basename);
+
+    std::string script =
+  "set term png\n"
+  "set output '"+basename+".png'\n"
+  "set grid\n"
+  "set key out\n"
+  "set mxtics\n"
+  "set mytics\n"
+  "set title '"+title+"'\n"
+  "plot '"+fname+"' using 2:20 w l lw 2 t 'Txx,x' \\\n"
+  "    ,'"+fname+"' using 2:14 w l lw 2 t 'P,x'   \\\n"
+  "    ,'"+fname+"' using 2:7  w l lw 2 t 'Txy'   \\\n"
+  "    ,'"+fname+"' using 2:21 w l lw 2 t 'Txy,x' \\\n"
+  "    ,'"+fname+"' using 2:25 w l lw 2 t 'Txy,y' \\\n"
+  "    ,'"+fname+"' using 2:11 w l lw 2 t 'Gammaxy'\n";
+
+    gen_gnuplot_script(basename,script);
+  }
+
+  static void viz2( const std::string& basename, const std::string& title )
+  {
+    const std::string& fname = datafile(basename);
+
+    std::string script =
+  "set term png\n"
+  "set output '"+basename+".png'\n"
+  "set size 1,1\n"
+  "set origin 0,0\n"
+  "set grid\n"
+  "set key out\n"
+  "set mxtics\n"
+  "set mytics\n"
+  "set multiplot\n"
+  "\n"
+  "set size 1,.5\n"
+  "set origin 0,.5\n"
+  "set title '"+title+"'\n"
+  "plot '"+fname+"' using 1:6 w l lw 2 t 'Txx' \\\n"
+  "    ,'"+fname+"' using 1:3 w l lw 2 t 'P'   \\\n"
+  "    ,'"+fname+"' using 1:7 w l lw 2 t 'Txy' \\\n"
+  "    ,'"+fname+"' using 1:11 w l lw 2 t 'Gammaxy'\n"
+  "\n"
+  "unset title\n"
+  "set size 1,.5\n"
+  "set origin 0,0\n"
+  "plot '"+fname+"' using 1:20 w l lw 2 t 'Txx,x' \\\n"
+  "    ,'"+fname+"' using 1:14 w l lw 2 t 'P,x'   \\\n"
+  "    ,'"+fname+"' using 1:21 w l lw 2 t 'Txy,x' \\\n"
+  "    ,'"+fname+"' using 1:25 w l lw 2 t 'Txy,y'\n";
+
+    gen_gnuplot_script(basename,script);
   }
 
 };

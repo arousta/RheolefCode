@@ -39,6 +39,9 @@
 #include "FieldVisualization.h"
 //ali 21 Oct 2011
 #include "Restart.h"
+#include "FieldVisualization.h"
+#include <cstdlib>
+#include <iomanip>
 
 using namespace rheolef;
 
@@ -56,10 +59,10 @@ void solver_wavychannel::load_xml_file( )
  * @brief Constructor initialising the xmlparam
  * @param xml_parameters
  */
-solver_wavychannel::solver_wavychannel( char const* filename )
+solver_wavychannel::solver_wavychannel( int argc, char** argv )
 :monitors()
 ,parameters(0) /*added by ali 16 Jun 2011*/
-,xml_filename(filename)
+,xml_filename(argv[1])
 ,xmldoc( new TiXmlDocument )
 ,restart_file("restart_info") //ali 24 Oct 2011
 ,uzawa_iter_restart(0)
@@ -72,6 +75,17 @@ solver_wavychannel::solver_wavychannel( char const* filename )
     //added by ali 14 Jun 2011
     load_xml_file();
     set_basename();
+
+    _timestep=0;
+    _timereal=0.;
+    _adaptstep=0;
+
+    //ali 26 Oct 2011
+    //only doing a postprocessing
+    if( 2<argc ){
+        viz1(argc,argv);
+        exit(0);
+    }
 
     //ali 25 Oct 2011
     {
@@ -88,11 +102,6 @@ solver_wavychannel::solver_wavychannel( char const* filename )
         restart();
         return;
     }
-
-
-    _timestep=0;
-    _timereal=0.;
-    _adaptstep=0;
 
     FE_initialize();
 
@@ -1490,23 +1499,6 @@ void solver_wavychannel::write_fields(const string& name )
     // ali 23 Oct 2011
     monitors["uL2"].clear();
     monitors["gL2"].clear();
-
-
-//    orheostream oo("restart","mfield");
-//    oo << catchmark("p") << FEfields["p"];
-//    oo.close();
-//    rheolef::point p1(0.,0.);
-//    rheolef::point p2(0.,3.);
-//    SegmentedLine sline( p1, p2, 10, FEfields["p"].get_geo() );
-//    Field1D<rheolef::Float> p( sline, FEfields["p"] );
-//    Field1D<rheolef::tensor> tau( sline, FEfields["T"] );
-//    Field1D<rheolef::tensor> gam( sline, FEfields["gamma"] );
-//    TPGammaRecord r;
-//    r.P = &p;
-//    r.T = &tau;
-//    r.Gam = &gam;
-//
-//    write2file("new.data",sline,r);
 }
 
 
@@ -1996,6 +1988,7 @@ void solver_wavychannel::write_restart_files( const int niter )
        << endl;
 }
 
+
 void solver_wavychannel::save_monitors( std::ofstream& o )
 {
   o << setprecision( std::numeric_limits<Float>::digits10 );
@@ -2003,12 +1996,11 @@ void solver_wavychannel::save_monitors( std::ofstream& o )
   Restart::save_std_vector( monitors["flowrate"], o, "flowrate" );
   Restart::save_std_vector( monitors["uL2"], o, "uL2" );
   Restart::save_std_vector( monitors["gL2"], o, "gL2" );
-  o.close();
 }
+
 
 void solver_wavychannel::load_monitors( std::ifstream& i )
 {
-  assert( i.is_open() );
   Restart::load_std_vector( monitors["dPdL"], i );
   Restart::load_std_vector( monitors["flowrate"], i );
   Restart::load_std_vector( monitors["uL2"], i );
@@ -2051,3 +2043,151 @@ void solver_wavychannel::restart( )
   i.close();
 }
 
+
+void solver_wavychannel::load_fields_for_postprocessing( const string& fieldfile )
+{
+ irheostream in;
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("u")     >> FEfields["u"];
+ in.close();
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("T")     >> FEfields["T"];
+ in.close();
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("gamma") >> FEfields["gamma"];
+ in.close();
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("p") >> FEfields["p"];
+ in.close();
+}
+
+
+
+
+void solver_wavychannel::put_fields_on_line( const std::string& basename, SegmentedLine& sline, TPVGammaRecord& r )
+{
+  using rheolef::Float;
+  using rheolef::point;
+  using rheolef::tensor;
+
+  FieldEvaluator E;
+  GradEvaluator GE( sline.spacing() );
+  GE.remove_unvalid_points_of_line(sline, FEfields["p"].get_geo() );
+
+  Field1D<Float> p( sline, FEfields["p"], E );
+  Field1D<point> v( sline, FEfields["u"], E );
+  Field1D<tensor> tau( sline, FEfields["T"], E );
+  Field1D<tensor> gam( sline, FEfields["gamma"], E );
+
+  Field1D<MTinyVector<Float> >  gradp( sline, FEfields["p"], GE );
+  Field1D<MTinyVector<point> >  gradv( sline, FEfields["u"], GE );
+  Field1D<MTinyVector<tensor> > gradt( sline, FEfields["T"], GE );
+  Field1D<MTinyVector<tensor> > gradg( sline, FEfields["gamma"], GE );
+
+  r.P = p;
+  r.V = v;
+  r.T = tau;
+  r.Gam = gam;
+
+  r.GP = gradp;
+  r.GV = gradv;
+  r.GT = gradt;
+  r.GGam = gradg;
+
+  write2file(basename+".dat",sline,r);
+}
+
+
+void solver_wavychannel::viz1( int argc, char** argv )
+{
+  double height, amplitude, L, Bn;
+  {
+    path_t path[] = {"mesh","height"};
+    get_from_xml(path,&height);
+  }
+  {
+    path_t path[] = {"mesh","amplitude"};
+    get_from_xml(path,&amplitude);
+  }
+  {
+    path_t path[] = {"mesh","length"};
+    get_from_xml(path,&L);
+  }
+  {
+    path_t path[] = {"FluidProperties","Bn"};
+    get_from_xml(path,&Bn);
+  }
+  const double max_width( height+amplitude );
+
+  load_fields_for_postprocessing(argv[3]);
+
+  enum {x,y};
+  int N = 100;
+  rheolef::point p1(0.,0.);
+  rheolef::point p2(0.,max_width);
+  string base;
+  SegmentedLine line( p1, p2, N, FEfields["p"].get_geo() );
+  TPVGammaRecord R;
+  std::stringstream ss;
+  ss << "delh=" << 2*amplitude << ", Bn=" << Bn;
+
+  base = "mid";
+  put_fields_on_line(base,line,R);
+  TPVGammaRecord::viz1(base,ss.str());
+  exec_shell("gnuplot "+base+".gnu");
+
+  //find height of yield surface
+  Float Hy(0.);
+  for( size_t i=0; i<line.size(); ++i )
+  {
+      if( (R.Gam(i))(x,y)!=0. ){
+        Hy = (line.point(i))[y];
+        break;
+      }
+  }
+  assert(0.<Hy);
+  printf("Hy found to be: %f\n",Hy);
+
+  base = "Hy";
+  std::stringstream ss2;
+  ss2 << "Hy=" << std::setprecision(3) << Hy << ", " << ss.str();
+  p1 = point(-L/2,Hy);
+  p2 = point( L/2,Hy);
+  line.create_line(p1,p2,N);
+  put_fields_on_line(base,line,R);
+  TPVGammaRecord::viz2( base, ss2.str() );
+  exec_shell("gnuplot "+base+".gnu");
+
+  base = "Hy2";
+  ss2.str("");
+  ss2 << "Hy/2=" << std::setprecision(3) << Hy/2 << ", " << ss.str();
+  p1=point(-L/2,Hy/2);
+  p2=point(L/2,Hy/2);
+  line.create_line(p1,p2,N);
+  put_fields_on_line(base,line,R);
+  TPVGammaRecord::viz2( base, ss2.str() );
+  exec_shell("gnuplot "+base+".gnu");
+
+  const int M = 6;
+  SegmentedLine l( point(0,Hy), point(0,max_width), M, FEfields["p"].get_geo() );
+  for( size_t i=1; i<M-1; ++i )
+  {
+      const double yc = (l.point(i))[y];
+      std::stringstream t;
+      t << "y=" << std::setprecision(3) << yc << ", " << ss.str();
+      base = "y"+rheolef::itos(i);
+      p1=point(-L/2,yc);
+      p2=point( L/2,yc);
+      line.create_line(p1,p2,N);
+      put_fields_on_line(base,line,R);
+      TPVGammaRecord::viz2( base, t.str() );
+      exec_shell("gnuplot "+base+".gnu");
+  }
+
+
+
+}

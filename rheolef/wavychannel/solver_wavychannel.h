@@ -50,6 +50,7 @@ class TiXmlElement;
 
 //added by ali 21 Oct 2011
 #include "Restart.h"
+#include "FieldVisualization.h"
 
 #define EPS 1e-25
 
@@ -211,18 +212,18 @@ private:
         bool path_exist( path_t (&path)[depth] );
         template< int depth >
         string get_string( path_t (&path)[depth] );
-        //added by ali 21 Oct 2011
+        //ali Oct 2011
         const char* restart_file;
         void restart();
-//        void read_restart_field( const std::string& name )
-//        {Restart::read_field( name, FEfields[name] );}
-        //ali 23 Oct 2011
         int uzawa_iter_restart;
         bool is_a_restart;
         Restart _restart;
         void save_monitors( std::ofstream& );
         void load_monitors( std::ifstream& );
         void write_restart_files( const int niter );
+        void load_fields_for_postprocessing( const string& fieldfile );
+        void viz1( int argc, char** argv );
+        void put_fields_on_line( const std::string& basename, SegmentedLine& sline, TPVGammaRecord& r );
 
 //	XMLParser*  xmlparam;
 	//parameters params;
@@ -315,7 +316,9 @@ public:
 
 	//added by ali 12 Jun 2011
 //    solver_wavychannel(XMLParser & xml_params);
-	solver_wavychannel( char const* filename );
+//	solver_wavychannel( char const* filename );
+	//ali 26 Oct 2011
+	solver_wavychannel( int argc, char** argv );
 
 	~solver_wavychannel();
 	void solve();

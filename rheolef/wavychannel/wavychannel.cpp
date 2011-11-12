@@ -40,14 +40,9 @@ int main(int argc, char**argv)
 {
 
 //  print_xml_doc( argc, argv );
-//  read_xml( argv[1] );
-//  return 1;
 
-  solver_wavychannel solver( argv[1] );
+  solver_wavychannel solver( argc, argv );
   solver.solve();
-
-  // Define Variables:
-  //gridparameters parameters_grid;
 
   return 1;
 }

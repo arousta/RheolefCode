@@ -83,7 +83,8 @@ solver_wavychannel::solver_wavychannel( int argc, char** argv )
     //ali 26 Oct 2011
     //only doing a postprocessing
     if( 2<argc ){
-        viz1(argc,argv);
+        load_fields_for_postprocessing(argv[3]);
+        viz1();
         exit(0);
     }
 
@@ -1559,7 +1560,7 @@ void solver_wavychannel::solve()
 			tmp << _basename << "_gridadapt" << _adaptstep;
 			_dataname = tmp.str();
 			write_fields(_dataname);
-			//write_all();
+			viz1();
             if( i!=adapt_max )
         	adapt_grid();
         }
@@ -2101,8 +2102,24 @@ void solver_wavychannel::put_fields_on_line( const std::string& basename, Segmen
   write2file(basename+".dat",sline,r);
 }
 
+void solver_wavychannel::horizn_output( const string& base, const string& title, const Float y )
+{
+  Float L;
+  {
+    path_t path[] = {"mesh","length"};
+    get_from_xml(path,&L);
+  }
+  const int N = 200;
+  rheolef::point p1(-L/2,y);
+  rheolef::point p2( L/2,y);
+  SegmentedLine line( p1, p2, N, FEfields["p"].get_geo() );
+  TPVGammaRecord R;
+  put_fields_on_line(base,line,R);
+  TPVGammaRecord::viz2( base, title );
+  exec_shell("gnuplot "+base+".gnu");
+}
 
-void solver_wavychannel::viz1( int argc, char** argv )
+void solver_wavychannel::viz1( )
 {
   double height, amplitude, L, Bn;
   {
@@ -2123,10 +2140,9 @@ void solver_wavychannel::viz1( int argc, char** argv )
   }
   const double max_width( height+amplitude );
 
-  load_fields_for_postprocessing(argv[3]);
 
   enum {x,y};
-  int N = 100;
+  int N = 200;
   rheolef::point p1(0.,0.);
   rheolef::point p2(0.,max_width);
   string base;
@@ -2140,54 +2156,72 @@ void solver_wavychannel::viz1( int argc, char** argv )
   TPVGammaRecord::viz1(base,ss.str());
   exec_shell("gnuplot "+base+".gnu");
 
-  //find height of yield surface
-  Float Hy(0.);
+  //find height of yield surface and heigh of dead region (if exist)
+  Float Hy(0.), Hd(0.);
   for( size_t i=0; i<line.size(); ++i )
   {
-      if( (R.Gam(i))(x,y)!=0. ){
+      if( (R.Gam(i))(x,y)!=0. )
+      {
         Hy = (line.point(i))[y];
+        //proceed to find H of dead region if exist
+        for( int j=i+1; j<line.size(); ++j )
+        {
+            if( (R.Gam(j))(x,y)==0. ){
+              Hd = (line.point(j))[y];
+              break;
+            }
+        }
         break;
       }
   }
   assert(0.<Hy);
-  printf("Hy found to be: %f\n",Hy);
+  printf("Hy found: %f\n",Hy);
+  if( Hy<Hd )
+    printf("Hd found: %f\n",Hd);
 
   base = "Hy";
   std::stringstream ss2;
   ss2 << "Hy=" << std::setprecision(3) << Hy << ", " << ss.str();
-  p1 = point(-L/2,Hy);
-  p2 = point( L/2,Hy);
-  line.create_line(p1,p2,N);
-  put_fields_on_line(base,line,R);
-  TPVGammaRecord::viz2( base, ss2.str() );
-  exec_shell("gnuplot "+base+".gnu");
+  horizn_output("Hy",ss2.str(),Hy);
 
   base = "Hy2";
   ss2.str("");
   ss2 << "Hy/2=" << std::setprecision(3) << Hy/2 << ", " << ss.str();
-  p1=point(-L/2,Hy/2);
-  p2=point(L/2,Hy/2);
-  line.create_line(p1,p2,N);
-  put_fields_on_line(base,line,R);
-  TPVGammaRecord::viz2( base, ss2.str() );
-  exec_shell("gnuplot "+base+".gnu");
+  horizn_output("Hy2",ss2.str(),Hy/2);
 
-  const int M = 6;
-  SegmentedLine l( point(0,Hy), point(0,max_width), M, FEfields["p"].get_geo() );
+
+
+  if( Hy<Hd )
+    p2 = point(0,Hd);
+  else
+    p2 = point(0,max_width);
+  const int M = 4;
+  SegmentedLine l( point(0,Hy), p2, M, FEfields["p"].get_geo() );
   for( size_t i=1; i<M-1; ++i )
   {
       const double yc = (l.point(i))[y];
       std::stringstream t;
       t << "y=" << std::setprecision(3) << yc << ", " << ss.str();
       base = "y"+rheolef::itos(i);
-      p1=point(-L/2,yc);
-      p2=point( L/2,yc);
-      line.create_line(p1,p2,N);
-      put_fields_on_line(base,line,R);
-      TPVGammaRecord::viz2( base, t.str() );
-      exec_shell("gnuplot "+base+".gnu");
+      horizn_output(base,t.str(),yc);
   }
 
 
-
+  if( Hy<Hd )
+  {
+    l.create_line( point(0,Hd), point(0,max_width), M );
+    for( int i=0; i<M-1; ++i )
+    {
+      const double yd = (l.point(i))[y];
+      base = "Hd"+itos(i);
+      ss2.str("");
+      ss2 << base+"=" << std::setprecision(4) << yd << ", " << ss.str();
+      horizn_output(base,ss2.str(),yd);
+    }
+  }
 }
+
+
+
+
+

@@ -222,7 +222,8 @@ private:
         void load_monitors( std::ifstream& );
         void write_restart_files( const int niter );
         void load_fields_for_postprocessing( const string& fieldfile );
-        void viz1( int argc, char** argv );
+        void viz1( );
+        void horizn_output( const string& base, const string& title, const Float y );
         void put_fields_on_line( const std::string& basename, SegmentedLine& sline, TPVGammaRecord& r );
 
 //	XMLParser*  xmlparam;

@@ -35,9 +35,6 @@
 using rheolef::Float;
 
 
-// Project Includes
-//#include "gridparameters.h"
-//#include "util/XMLParser.h"
 
 using namespace std;
 const Float pi=3.141592653589793238512808959406186204433;
@@ -114,19 +111,16 @@ private:
 
 public:
 	// Constructors Destructors
-    mk_mesh( char const* fname );
-	//mk_mesh(XMLParser & xmlparams);
-    ~mk_mesh();
-    //int bamg_wavychannel(structwavychannel &);
-
-//	int bamg_makemesh(XMLParser & xmlparam );
-//    int bamg_wavychannel(XMLParser & xmlparam );
-//	int bamg_ellipsoid(XMLParser & xmlparam );
+        mk_mesh( char const* fname );
+        ~mk_mesh();
 
 	//added by ali 11 Jun 2011
         int bamg_makemesh( );
         int bamg_wavychannel( );
         int bamg_ellipsoid( );
+        //ali 12 Nov
+        void bamg_squarechannel( );
+        void bamg_trichannel();
 };
 
 

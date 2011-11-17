@@ -21,6 +21,9 @@
 
 #include "SimpleXML.h"
 #include "addedUtil.h"
+//ali Nov 2011
+#include "FieldVisualization.h"
+
 
 using namespace std;
 
@@ -63,15 +66,319 @@ int mk_mesh::bamg_makemesh( )
 		bamg_wavychannel();
 	else if (meshtype=="ellipsoid")
 		bamg_ellipsoid();
+	else if(meshtype=="squarechannel")
+	        bamg_squarechannel();
+	else if(meshtype=="trichannel")
+	        bamg_trichannel();
 	else
 	{
 		cout 	<< "Wrong problem supplied:" << endl
 				<< "  You supplied: " << meshtype << endl
 				<< "  Allowed values are: " << endl
 				<< "     - wavychannel" << endl
-				<< "     - ellipsoid" << endl;
+				<< "     - ellipsoid" << endl
+				<< "     - squarechannel" << endl
+				<< "     - trichannel"  << endl;
 	}
 	return 1;
+}
+
+
+void mk_mesh::bamg_trichannel()
+{
+      string basename,filename,path;
+      string geom;
+      double length,height,amplitude,width,hmax;
+      int subdivisions_top, nvertices;
+
+      Float xi=0.,dx=0.;
+
+      {
+        path_t ppath[] = {"workdir"};
+        get_from_xml(ppath, &path);
+      }
+      {
+        path_t path[] = {"basename"};
+        get_from_xml(path, &basename);
+      }
+      filename = path + "/" + basename;
+
+      {
+        path_t path[] = {"mesh","geom"};
+        get_from_xml(path, &geom);
+      }
+      {
+        path_t path[] = {"mesh","length"};
+        get_from_xml(path, &length);
+      }
+      {
+        path_t path[] = {"mesh","height"};
+        get_from_xml(path, &height);
+      }
+      {
+        path_t path[] = {"mesh","width"};
+        get_from_xml(path,&width);
+      }
+      {
+        path_t path[] = {"mesh","amplitude"};
+        get_from_xml(path, &amplitude);
+      }
+      {
+        path_t path[] = {"mesh","subdivisions_top"};
+        get_from_xml(path, &subdivisions_top);
+      }
+      {
+        path_t path[] = {"mesh","hmax"};
+        get_from_xml(path, &hmax);
+      }
+
+      cout << "\n\t\tWorkdir              = " << path << endl
+              << "\n\t\tbasename              = " << basename << endl
+              << "\n\t\tmesh/geom             = " << geom << endl
+              << "\n\t\tmesh/length           = " << length << endl
+              << "\n\t\tmesh/height           = " << height << endl
+              << "\n\t\tmesh/amplitude        = " << amplitude << endl
+              << "\n\t\tmesh/hmax             = " << hmax << endl
+              << "\n\t\tmesh/subdivsions_top  = " << subdivisions_top << endl;
+      cout << "...done\n" << endl;
+
+      if ("symy" == geom)
+      {
+              dx=length/subdivisions_top; //stepsize
+              nvertices = 7;
+      }
+      else if ("symxy" == geom)
+      {
+              length = length*2;
+              dx=length/(2.*subdivisions_top);
+              nvertices = 5;
+      }
+      else
+      {
+              cerr << "Wrong geometry type !!!" << endl;
+              std::exit(-1);
+      }
+
+      string bname = filename + "_g.msh";
+      ofstream outf(bname.c_str());
+      outf << "MeshVersionFormatted 0\n"
+           << "AngleOfCornerBound 46\n"
+           << "Dimension 2\n"
+           << "Vertices " << nvertices
+           << '\n';
+
+      double ych1 = height-amplitude;
+      double ych2 = height+amplitude;
+      xi= -length/2.;  // Left startpoint
+      outf << xi << " 0 1\n";
+      outf << xi << " " << ych1 << " 2\n";
+      xi = -width/2.;
+      outf << xi << " " << ych1 << " 2\n";
+      outf << 0. << " " << ych2 << " 2\n";
+      if( geom=="symxy" )
+      {
+          outf << "0 0 3\n";
+      }
+      else if( geom=="symy" )
+      {
+          xi = -xi;
+          outf << xi << " " << ych1 << " 2\n";
+          xi = length/2.;
+          outf << xi << " " << ych1 << " 2\n";
+          outf << xi << " 0 3\n";
+      }
+      //writing edges
+      outf << "Edges " << nvertices
+           << "\n1 2 1\n";
+      for( int i=2; i<nvertices-1; ++i ){
+          outf << i << " " << i+1 << " 2\n";
+      }
+      outf << nvertices-1 << " " << nvertices << " 3\n";
+      outf << nvertices << " 1 4\n";
+
+      outf << "hVertices\n";
+      for( int i=0; i<nvertices; ++i ){
+          outf << "1 ";
+      }
+      outf.close();
+
+      cout << "\n\n\nCreate .bamg file " << endl;
+      string command ="bamg ";
+      command += " -g " + bname;
+      command += " -o " + filename + ".bamg";
+      char tmp[100];
+      sprintf(tmp," -hmax %f ",hmax);
+      command.append(tmp);
+      cout << command << endl;
+      exec_shell(command);
+
+      // Create domain list file:
+      string dname = filename + ".dmn";
+      outf.open(dname.c_str());
+      outf << "EdgeDomainNames\n"
+              "4\n"
+              "left\n"
+              "top\n"
+              "right\n"
+              "bottom\n";
+      outf.close();
+
+      // Transform into geo file
+      command = "bamg2geo ";
+      command += filename + ".bamg ";
+      command += filename + ".dmn";
+      command += " > " + filename + ".geo";
+      exec_shell(command);
+}
+
+
+void mk_mesh::bamg_squarechannel()
+{
+      string basename,filename,path;
+      string geom;
+      double length,height,amplitude,width,hmax;
+      int subdivisions_top, nvertices;
+
+      Float xi=0.,dx=0.;
+
+      {
+        path_t ppath[] = {"workdir"};
+        get_from_xml(ppath, &path);
+      }
+      {
+        path_t path[] = {"basename"};
+        get_from_xml(path, &basename);
+      }
+      filename = path + "/" + basename;
+
+      {
+        path_t path[] = {"mesh","geom"};
+        get_from_xml(path, &geom);
+      }
+      {
+        path_t path[] = {"mesh","length"};
+        get_from_xml(path, &length);
+      }
+      {
+        path_t path[] = {"mesh","height"};
+        get_from_xml(path, &height);
+      }
+      {
+        path_t path[] = {"mesh","width"};
+        get_from_xml(path,&width);
+      }
+      {
+        path_t path[] = {"mesh","amplitude"};
+        get_from_xml(path, &amplitude);
+      }
+      {
+        path_t path[] = {"mesh","subdivisions_top"};
+        get_from_xml(path, &subdivisions_top);
+      }
+      {
+        path_t path[] = {"mesh","hmax"};
+        get_from_xml(path, &hmax);
+      }
+
+      cout << "\n\t\tWorkdir              = " << path << endl
+              << "\n\t\tbasename              = " << basename << endl
+              << "\n\t\tmesh/geom             = " << geom << endl
+              << "\n\t\tmesh/length           = " << length << endl
+              << "\n\t\tmesh/height           = " << height << endl
+              << "\n\t\tmesh/amplitude        = " << amplitude << endl
+              << "\n\t\tmesh/hmax             = " << hmax << endl
+              << "\n\t\tmesh/subdivsions_top  = " << subdivisions_top << endl;
+      cout << "...done\n" << endl;
+
+      if ("symy" == geom)
+      {
+              dx=length/subdivisions_top; //stepsize
+              nvertices = 8;
+      }
+      else if ("symxy" == geom)
+      {
+              length = length*2;
+              dx=length/(2.*subdivisions_top);
+              nvertices = 6;
+      }
+      else
+      {
+              cerr << "Wrong geometry type !!!" << endl;
+              std::exit(-1);
+      }
+
+      string bname = filename + "_g.msh";
+      ofstream outf(bname.c_str());
+      outf << "MeshVersionFormatted 0\n"
+           << "AngleOfCornerBound 46\n"
+           << "Dimension 2\n"
+           << "Vertices " << nvertices
+           << '\n';
+
+      double ych1 = height-amplitude;
+      double ych2 = height+amplitude;
+      xi= -length/2.;  // Left startpoint
+      outf << xi << " 0 1\n";
+      outf << xi << " " << ych1 << " 2\n";
+      xi = -width/2.;
+      outf << xi << " " << ych1 << " 2\n";
+      outf << xi << " " << ych2 << " 2\n";
+      if( geom=="symxy" )
+      {
+          outf << "0 " << ych2 << " 2\n";
+          outf << "0 0 3\n";
+      }
+      else if( geom=="symy" )
+      {
+          xi = -xi;
+          outf << xi << " " << ych2 << " 2\n";
+          outf << xi << " " << ych1 << " 2\n";
+          xi = length/2.;
+          outf << xi << " " << ych1 << " 2\n";
+          outf << xi << " 0 3\n";
+      }
+      //writing edges
+      outf << "Edges " << nvertices
+           << "\n1 2 1\n";
+      for( int i=2; i<nvertices-1; ++i ){
+          outf << i << " " << i+1 << " 2\n";
+      }
+      outf << nvertices-1 << " " << nvertices << " 3\n";
+      outf << nvertices << " 1 4\n";
+
+      outf << "hVertices\n";
+      for( int i=0; i<nvertices; ++i ){
+          outf << "5 ";
+      }
+      outf.close();
+
+      cout << "\n\n\nCreate .bamg file " << endl;
+      string command ="bamg ";
+      command += " -g " + bname;
+      command += " -o " + filename + ".bamg";
+      char tmp[100];
+      sprintf(tmp," -hmax %f ",hmax);
+      command.append(tmp);
+      cout << command << endl;
+      exec_shell(command);
+
+      // Create domain list file:
+      string dname = filename + ".dmn";
+      outf.open(dname.c_str());
+      outf << "EdgeDomainNames\n"
+              "4\n"
+              "left\n"
+              "top\n"
+              "right\n"
+              "bottom\n";
+      outf.close();
+
+      // Transform into geo file
+      command = "bamg2geo ";
+      command += filename + ".bamg ";
+      command += filename + ".dmn";
+      command += " > " + filename + ".geo";
+      exec_shell(command);
 }
 
 /**
@@ -94,7 +401,6 @@ int mk_mesh::bamg_wavychannel( )
 	// ----------------------------------------------
 	cout << "Parse XML file ..." << endl;
 
-//	xmlparam.get_childelement_stream("workdir") >> path;
 //	xmlparam.get_childelement_stream("basename") >> basename;
 	//added by ali 29 Jun 2011
 	{
@@ -107,11 +413,6 @@ int mk_mesh::bamg_wavychannel( )
 	}
 	filename = path + "/" + basename;	
 
-//	xmlparam.get_childelement_stream("mesh/geom") >> geom;
-//	xmlparam.get_childelement_stream("mesh/length") >> length;
-//	xmlparam.get_childelement_stream("mesh/height") >> height;
-//	xmlparam.get_childelement_stream("mesh/amplitude") >> amplitude;
-//	xmlparam.get_childelement_stream("mesh/subdivisions_top") >> subdivisions_top;
 //	xmlparam.get_childelement_stream("mesh/hmax") >> hmax;
 	//added by ali 29 Jun 2011
 	{

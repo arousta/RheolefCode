@@ -31,20 +31,10 @@
 		- Handle multiple entries in input files
 		- Call a general grid_construction method (not wavychannel)
  */
-int zmain(int argc, char**argv)
+int xmain(int argc, char**argv)
 {
-
   mk_mesh mesh( argv[1] );
   mesh.bamg_makemesh( );
   cout << "done" <<  endl;
-	
-
-  // Define Variables:
-  //gridparameters parameters_grid;
-  //mk_mesh mesh;
-
-  //Create Testmesh
-  //mesh.bamg_wavychannel(parameters_grid.wavychannel);
-	
   return 1;
 }

@@ -21,7 +21,7 @@ const int Dim(2);
 
 inline void exec_shell( const std::string& command )
 {
-  printf("execute: %s\n",command.c_str());
+  std::cout << command << '\n';
   int status = system(command.c_str());
 }
 
@@ -74,9 +74,9 @@ public:
           points.push_back(p);
         else
         {
-          std::cout << "point (";
-          p.put(std::cout,Dim);
-          std::cout << ") out of mesh\n";
+//          std::cout << "point (";
+//          p.put(std::cout,Dim);
+//          std::cout << ") out of mesh\n";
         }
         p += d;
     }
@@ -203,7 +203,7 @@ struct GradEvaluator
             )
           )
           {
-            std::printf("point i=%3u to be removed\n",i);
+            //std::printf("point i=%3u to be removed\n",i);
             erase_flag.push_back(i);
           }
     }

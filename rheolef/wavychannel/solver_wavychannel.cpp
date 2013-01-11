@@ -42,8 +42,16 @@
 #include "FieldVisualization.h"
 #include <cstdlib>
 #include <iomanip>
+//ali 16 Jan 2012
+#include "MyUtil.h"
+#include <utility>
+#include <cassert>
+//ali 17 Feb 2012
+#include <iostream>
+#include <fstream>
 
 using namespace rheolef;
+
 
 void solver_wavychannel::load_xml_file( )
 {
@@ -83,8 +91,12 @@ solver_wavychannel::solver_wavychannel( int argc, char** argv )
     //ali 26 Oct 2011
     //only doing a postprocessing
     if( 2<argc ){
-        load_fields_for_postprocessing(argv[3]);
-        viz1();
+        enum {x,y};
+        load_fields_for_postprocessing(argv[2]);
+        dump_matlab("matlab");
+//        viz1();
+//        plot_fp_fT();
+//        exec_shell("mkdir post && mv *.png *.gnu *.dat post/");
         exit(0);
     }
 
@@ -1560,9 +1572,13 @@ void solver_wavychannel::solve()
 			tmp << _basename << "_gridadapt" << _adaptstep;
 			_dataname = tmp.str();
 			write_fields(_dataname);
-			viz1();
             if( i!=adapt_max )
         	adapt_grid();
+            else {
+	        viz1();
+	        plot_fp_fT();
+	        exec_shell("mkdir post && mv *.png *.gnu *.dat post/");
+            }
         }
 		else if (algorithm == "Uzawa" & str_SolverViscoplastic_Model!="Bingham")
 		{
@@ -2048,13 +2064,12 @@ void solver_wavychannel::restart( )
 void solver_wavychannel::load_fields_for_postprocessing( const string& fieldfile )
 {
  irheostream in;
-
  in.open(fieldfile,"mfield");
- in >> catchmark("u")     >> FEfields["u"];
+ in >> catchmark("u") >> FEfields["u"];
  in.close();
 
  in.open(fieldfile,"mfield");
- in >> catchmark("T")     >> FEfields["T"];
+ in >> catchmark("T") >> FEfields["T"];
  in.close();
 
  in.open(fieldfile,"mfield");
@@ -2064,60 +2079,229 @@ void solver_wavychannel::load_fields_for_postprocessing( const string& fieldfile
  in.open(fieldfile,"mfield");
  in >> catchmark("p") >> FEfields["p"];
  in.close();
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("gammadot") >> FEfields["gammadot"];
+ in.close();
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("secinv_gamma") >> FEfields["secinv_gamma"];
+ in.close();
+
+ in.open(fieldfile,"mfield");
+ in >> catchmark("secinv_gammadot") >> FEfields["secinv_gammadot"];
+ in.close();
 }
 
 
+bool solver_wavychannel::is_plug_broken( Float& wn, Float& ww )
+{
+  // assumptions:
+  // 1- the shape of channel is symmetric one x and sym line is x=0
+  // 2- min width of channel is on -L/2
+  Float L;
+  {
+    path_t path[] = {"mesh","length"};
+    get_from_xml(path,&L);
+  }
+  Myutil::set_Nan(&wn);
+  Myutil::set_Nan(&ww);
+
+  SegmentedLine line(point(-L/2,0),point(0,0),200,FEfields["p"].get_geo());
+
+  enum {x,y};
+  int in(0),iw(0);
+  for( size_t i=0; i<line.size()-1; ++i )
+  {
+      rheolef::tensor gleft,grite;
+      FEfields["gamma"].evaluate(line.point(i)  ,gleft);
+      FEfields["gamma"].evaluate(line.point(i+1),grite);
+      if( gleft(x,x)==0 && grite(x,x)!=0 ){
+        wn = .5*L+line.point(i)[x];
+        ++in;
+      }
+      if( gleft(x,x)!=0 && grite(x,x)==0 ){
+        ww = -line.point(i+1)[x];
+        ++iw;
+      }
+  }
+  assert((in==0 && iw==0) || (in==1 && iw==1));
+  return( in==1 );
+}
 
 
-void solver_wavychannel::put_fields_on_line( const std::string& basename, SegmentedLine& sline, TPVGammaRecord& r )
+struct segmentline_xiterator
+{
+  SegmentedLine const* l;
+  size_t i;
+
+  segmentline_xiterator( const SegmentedLine& line ): l(&line), i(0)
+  {}
+
+  enum {x,y};
+  Float operator*() const
+  {return l->point(i)[x];}
+
+  void operator++()
+  {++i;}
+};
+
+//interface adapter
+struct Txx_iterator_adapter
+{
+  Field1D<rheolef::tensor> const* T;
+  size_t i;
+
+  Txx_iterator_adapter( const Field1D<rheolef::tensor>& t ): T(&t), i(0)
+  {}
+
+  enum {x,y};
+  Float operator*()
+  {return (T->at(i))(x,x);}
+
+  void operator++()
+  {++i;}
+};
+
+void solver_wavychannel::plot_fp_fT()
+{
+  Float height, amplitude, L;
+  {
+    path_t path[] = {"mesh","height"};
+    get_from_xml(path,&height);
+  }
+  {
+    path_t path[] = {"mesh","amplitude"};
+    get_from_xml(path,&amplitude);
+  }
+  {
+    path_t path[] = {"mesh","length"};
+    get_from_xml(path,&L);
+  }
+
+  Float wn,ww;
+  Float lsample;
+  if( is_plug_broken(wn,ww) ){
+    lsample = 0.4*ww;
+    printf("Broken plug with wn(%f) and ww(%f)\n",wn,ww);
+  }
+  else {
+    lsample = L/6;
+    printf("Intact plug\n");
+  }
+
+  enum {x,y};
+  const Float max_width( height+amplitude );
+  SegmentedLine symx( point(0,0),point(0,max_width),50,FEfields["p"].get_geo() );
+  std::ofstream o("lsq.dat");
+  o << "#y fP cP fT cT, Pressure and T show xfp(y) and xfT(y) curves\n";
+  o << "#cP,cT are intercepts of least square fit\n";
+  o << "#lsample " << lsample << '\n';
+  Float mt_previous(0);
+  Float y_dTxxdx_zero(0),dpdx_at_y_dTxxdx_zero;
+  Myutil::set_Nan(&dpdx_at_y_dTxxdx_zero);
+  for( size_t j=0; j<symx.size(); ++j )
+  {
+      const Float Y = symx.point(j)[y];
+      o << Y <<' ';
+
+      SegmentedLine sl(point(0,Y),point(-lsample,Y),20,FEfields["p"].get_geo());
+      Postprocessing_FieldsOverLine R;
+      put_fields_on_line(sl,R);
+
+      segmentline_xiterator xiter(sl);
+      Float mp,cp;
+      Myutil::LinearLSQRFit lsq_fit;
+      lsq_fit.set_npoints(sl.size());
+      lsq_fit.leastsquare_linefit(xiter,R.P.begin(),&mp,&cp);
+      o << mp <<' '<< cp <<'\t';
+
+      Float mt,ct;
+      Txx_iterator_adapter Titer(R.T);
+      lsq_fit.leastsquare_linefit(xiter,Titer,&mt,&ct);
+      o << mt <<' '<< ct <<'\n';
+
+      if( mt*mt_previous<0 ){
+        y_dTxxdx_zero = Y;
+        dpdx_at_y_dTxxdx_zero = mp;
+      }
+      mt_previous = mt;
+  }
+  o.close();
+
+  std::stringstream title;
+  title << "'dTxxdx=0 @ y("<<y_dTxxdx_zero<<"), dpdx("<<dpdx_at_y_dTxxdx_zero<<")'\n";
+  std::string basename("lsq");
+  std::string fname("lsq.dat");
+  std::string script =
+  "set term png\n"
+  "set output '"+basename+".png'\n"
+  "set grid\n"
+  "set key out\n"
+  "set mxtics\n"
+  "set mytics\n"
+  "set title "+title.str()+
+  "\n"
+  "plot '"+fname+"' using 1:2 w l lw 2 t 'f(y) of P' \\\n"
+  "    ,'"+fname+"' using 1:4 w l lw 2 t 'g(y) of T'\n";
+  Postprocessing_FieldsOverLine::gen_gnuplot_script(basename,script);
+  exec_shell("gnuplot "+basename+".gnu");
+}
+
+
+void solver_wavychannel::put_fields_on_line( SegmentedLine& sline, Postprocessing_FieldsOverLine& r )
 {
   using rheolef::Float;
   using rheolef::point;
   using rheolef::tensor;
 
-  FieldEvaluator E;
-  GradEvaluator GE( sline.spacing() );
-  GE.remove_unvalid_points_of_line(sline, FEfields["p"].get_geo() );
-
-  Field1D<Float> p( sline, FEfields["p"], E );
-  Field1D<point> v( sline, FEfields["u"], E );
-  Field1D<tensor> tau( sline, FEfields["T"], E );
-  Field1D<tensor> gam( sline, FEfields["gamma"], E );
+  GradEvaluator GE( sline.spacing(), FEfields["p"].get_geo() );
+  GE.remove_unvalid_points_of_line(sline);
 
   Field1D<MTinyVector<Float> >  gradp( sline, FEfields["p"], GE );
   Field1D<MTinyVector<point> >  gradv( sline, FEfields["u"], GE );
   Field1D<MTinyVector<tensor> > gradt( sline, FEfields["T"], GE );
   Field1D<MTinyVector<tensor> > gradg( sline, FEfields["gamma"], GE );
 
-  r.P = p;
-  r.V = v;
-  r.T = tau;
-  r.Gam = gam;
-
   r.GP = gradp;
   r.GV = gradv;
   r.GT = gradt;
   r.GGam = gradg;
 
-  write2file(basename+".dat",sline,r);
+  FieldEvaluator E;
+  Field1D<Float> p( sline, FEfields["p"], E );
+  Field1D<point> v( sline, FEfields["u"], E );
+  Field1D<tensor> tau( sline, FEfields["T"], E );
+  Field1D<tensor> gam( sline, FEfields["gamma"], E );
+
+  r.P = p;
+  r.V = v;
+  r.T = tau;
+  r.Gam = gam;
+
+
 }
 
-void solver_wavychannel::horizn_output( const string& base, const string& title, const Float y )
+
+Postprocessing_FieldsOverLine solver_wavychannel::horizn_output( const string& base, const string& title, const Float y )
 {
   Float L;
   {
     path_t path[] = {"mesh","length"};
     get_from_xml(path,&L);
   }
-  const int N = 200;
   rheolef::point p1(-L/2,y);
   rheolef::point p2( L/2,y);
-  SegmentedLine line( p1, p2, N, FEfields["p"].get_geo() );
-  TPVGammaRecord R;
-  put_fields_on_line(base,line,R);
-  TPVGammaRecord::viz2( base, title );
+  SegmentedLine line(p1,p2,100,FEfields["p"].get_geo());
+
+  Postprocessing_FieldsOverLine R;
+  put_fields_on_line(line,R);
+  write2file(base+".dat",line,R);
+  Postprocessing_FieldsOverLine::viz_normalstress(base,title);
   exec_shell("gnuplot "+base+".gnu");
+  return R;
 }
+
 
 void solver_wavychannel::viz1( )
 {
@@ -2142,18 +2326,19 @@ void solver_wavychannel::viz1( )
 
 
   enum {x,y};
-  int N = 200;
+  int N = 50;
   rheolef::point p1(0.,0.);
   rheolef::point p2(0.,max_width);
   string base;
   SegmentedLine line( p1, p2, N, FEfields["p"].get_geo() );
-  TPVGammaRecord R;
+  Postprocessing_FieldsOverLine R;
   std::stringstream ss;
-  ss << "delh=" << 2*amplitude << ", Bn=" << Bn;
+  ss << "deltah=" << 2*amplitude << ", Bn=" << Bn;
 
   base = "mid";
-  put_fields_on_line(base,line,R);
-  TPVGammaRecord::viz1(base,ss.str());
+  put_fields_on_line(line,R);
+  write2file(base+".dat",line,R);
+  Postprocessing_FieldsOverLine::viz1(base,ss.str());
   exec_shell("gnuplot "+base+".gnu");
 
   //find height of yield surface and heigh of dead region (if exist)
@@ -2175,8 +2360,9 @@ void solver_wavychannel::viz1( )
       }
   }
   assert(0.<Hy);
+  const bool top_dead_region_exists = Hy<Hd;
   printf("Hy found: %f\n",Hy);
-  if( Hy<Hd )
+  if( top_dead_region_exists )
     printf("Hd found: %f\n",Hd);
 
   base = "Hy";
@@ -2189,13 +2375,11 @@ void solver_wavychannel::viz1( )
   ss2 << "Hy/2=" << std::setprecision(3) << Hy/2 << ", " << ss.str();
   horizn_output("Hy2",ss2.str(),Hy/2);
 
-
-
-  if( Hy<Hd )
+  if( top_dead_region_exists )
     p2 = point(0,Hd);
   else
     p2 = point(0,max_width);
-  const int M = 4;
+  const int M = 5;
   SegmentedLine l( point(0,Hy), p2, M, FEfields["p"].get_geo() );
   for( size_t i=1; i<M-1; ++i )
   {
@@ -2207,7 +2391,7 @@ void solver_wavychannel::viz1( )
   }
 
 
-  if( Hy<Hd )
+  if( top_dead_region_exists )
   {
     l.create_line( point(0,Hd), point(0,max_width), M );
     for( int i=0; i<M-1; ++i )
@@ -2222,6 +2406,41 @@ void solver_wavychannel::viz1( )
 }
 
 
+template< class T >
+void matlab( const field& f, const char* name, const geo& g )
+{
+  std::ofstream o(name);
+  o << "# " << g.name() << '\n';
+  for( geo::const_iterator_vertex vt=g.begin_vertex(); vt!=g.end_vertex(); ++vt )
+  {
+      T tmp;
+      f.evaluate(*vt,tmp);
+      GnuPlotWriter<T>::write(o,tmp);
+      o << '\n';
+  }
+  o << '\n';
+  o.close();
 
+  string c = "gzip ";
+  c.append(name);
+  exec_shell(c);
+}
 
+// Feb 17, 2012
+// writing fields for visualization in matlab
+void solver_wavychannel::dump_matlab( const char* fname )
+{
+  const geo& g = FEfields["p"].get_geo();
+  exec_shell("mkdir matlab");
 
+  matlab<Float>( FEfields["p"], "matlab/P", g );
+  matlab<point>( FEfields["u"], "matlab/U", g );
+  matlab<tensor>( FEfields["T"], "matlab/T", g );
+  matlab<tensor>( FEfields["gamma"], "matlab/gamma", g );
+  matlab<tensor>( FEfields["gammadot"], "matlab/gammadot", g );
+  matlab<Float>( FEfields["secinv_gamma"], "matlab/secinv_gamma", g );
+  matlab<Float>( FEfields["secinv_gammadot"], "matlab/secinv_gammadot", g );
+
+  FEfields["secinv_T"] = secinv( FEfields["T"] );
+  matlab<Float>( FEfields["secinv_T"], "matlab/secinv_T", g );
+}

@@ -60,4 +60,9 @@ raise_and_exit( char const* function, char const* file, size_t line, char const*
 }
 
 
+/**
+ * for debug
+ */
+void print(std::ostream& s, const rheolef::form& f );
+
 #endif /* ADDEDUTIL_H_ */

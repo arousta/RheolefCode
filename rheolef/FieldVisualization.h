@@ -28,6 +28,9 @@ inline void exec_shell( const std::string& command )
 class GeoGauge
 {
 public:
+  GeoGauge(): Th(0)
+  {}
+
   GeoGauge( const rheolef::geo& _Th )
   {set_geo(_Th);}
 
@@ -60,6 +63,12 @@ public:
   {
     create_line(_beg,_end,_n);
   }
+
+  SegmentedLine()
+  {}
+
+  void set_geo( const rheolef::geo& Th )
+  {gauge.set_geo(Th);}
 
   void create_line( const Point& beg, const Point& end, const int n )
   {
@@ -109,6 +118,9 @@ public:
     points = tmp;
   }
 
+  std::vector<Point>::const_iterator begin() const
+  {return points.begin();}
+
 private:
   int n;
   Point beg;
@@ -142,11 +154,17 @@ public:
         E( line->point(i), f, val[i] );
   }
 
+  size_t size() const
+  {return val.size();}
+
   const FieldType& at( size_t i ) const
   {return val[i];}
 
   const FieldType& operator()( size_t i ) const
   {return val[i];}
+
+  typename std::vector<FieldType>::const_iterator begin() const
+  {return val.begin();}
 };
 
 
@@ -175,10 +193,11 @@ private:
 
 struct GradEvaluator
 {
-  GradEvaluator( rheolef::Float _dl ):
+  GradEvaluator( rheolef::Float _dl, const rheolef::geo& Th ):
     dl(_dl)
    ,dx( rheolef::point(_dl/2.,0.) )
    ,dy( rheolef::point(0.,_dl/2.) )
+   ,gauge(Th)
   {}
 
   template< typename FieldType >
@@ -188,19 +207,16 @@ struct GradEvaluator
     val(1) = diffcenter<FieldType>(f,p,dy)/dl;
   }
 
-  void remove_unvalid_points_of_line( SegmentedLine& line, const rheolef::geo& Th ) const
+  void remove_unvalid_points_of_line( SegmentedLine& line ) const
   {
-    GeoGauge gauge(Th);
     std::vector<size_t> erase_flag;
     for( size_t i=0; i<line.size(); ++i )
     {
         const rheolef::point& p( line.point(i) );
         if(
-            !(
-              gauge.is_point_inside_geo(p+dx) && gauge.is_point_inside_geo(p-dx)
-                                              &&
-              gauge.is_point_inside_geo(p+dy) && gauge.is_point_inside_geo(p-dy)
-            )
+              at_least_one_of_the_points_inside(p,dx)
+                                                ||
+              at_least_one_of_the_points_inside(p,dy)
           )
           {
             //std::printf("point i=%3u to be removed\n",i);
@@ -211,18 +227,43 @@ struct GradEvaluator
   }
 
 private:
+  bool at_least_one_of_the_points_inside( const rheolef::point& p, const rheolef::point &dr ) const
+  {return !(gauge.is_point_inside_geo(p+dr) || gauge.is_point_inside_geo(p-dr));}
+
+  bool both_points_inside( const rheolef::point& p, const rheolef::point& dr ) const
+  {return (gauge.is_point_inside_geo(p+dr) && gauge.is_point_inside_geo(p-dr));}
+
   template< typename FieldType >
   const FieldType& diffcenter( const rheolef::field& f, const rheolef::point& r, const rheolef::point& dr ) const
   {
-    FieldType fpr, fmr;
-    f.evaluate(r-dr,fmr);
-    f.evaluate(r+dr,fpr);
-    return( fpr-fmr );
+    FieldType fpr, fmr, fp;
+    if( both_points_inside(r,dr) )
+    {
+      f.evaluate(r+dr,fpr);
+      f.evaluate(r-dr,fmr);
+      return( fpr-fmr );
+    }
+    else if( gauge.is_point_inside_geo(r+dr) ){
+        f.evaluate(r+dr,fpr);
+        f.evaluate(r,fp);
+        return( fpr-fp );
+    }
+    else if( gauge.is_point_inside_geo(r-dr) ){
+        f.evaluate(r-dr,fmr);
+        f.evaluate(r,fp);
+        return( fp-fmr );
+    }
+    else{
+        printf("Both points out of mesh....\n");
+        exit(-1);
+    }
+
   }
 
   rheolef::Float dl;
   rheolef::point dx;
   rheolef::point dy;
+  GeoGauge gauge;
 };
 
 
@@ -285,7 +326,8 @@ private:
 };
 
 
-template<>
+//removed because intel compiler errors on that
+//template<>
 template< typename FieldType >
 class GnuPlotWriter<MTinyVector<FieldType> >
 {
@@ -329,28 +371,31 @@ void write2file(
 }
 
 
-struct TPVGammaRecord
+
+struct Postprocessing_FieldsOverLine
 {
-  TPVGammaRecord()
+  Postprocessing_FieldsOverLine()
   {}
 
   typedef GnuPlotWriter<rheolef::tensor> twriter;
   typedef GnuPlotWriter<rheolef::Float>  swriter;
   typedef GnuPlotWriter<rheolef::point>  vwriter;
 
-  typedef GnuPlotWriter<MTinyVector<rheolef::Float> >  sswriter;
-  typedef GnuPlotWriter<MTinyVector<rheolef::point> >  vvwriter;
-  typedef GnuPlotWriter<MTinyVector<rheolef::tensor> > ttwriter;
-
   Field1D<rheolef::Float>   P;
   Field1D<rheolef::point>   V;
   Field1D<rheolef::tensor>  T;
   Field1D<rheolef::tensor>  Gam;
 
+
+  typedef GnuPlotWriter<MTinyVector<rheolef::Float> >  sswriter;
+  typedef GnuPlotWriter<MTinyVector<rheolef::point> >  vvwriter;
+  typedef GnuPlotWriter<MTinyVector<rheolef::tensor> > ttwriter;
+
   Field1D<MTinyVector<rheolef::Float> >   GP;
   Field1D<MTinyVector<rheolef::point> >   GV;
   Field1D<MTinyVector<rheolef::tensor> >  GT;
   Field1D<MTinyVector<rheolef::tensor> >  GGam;
+
 
   void write_header( std::ostream& o ) const
   {
@@ -404,11 +449,11 @@ struct TPVGammaRecord
   "set mytics\n"
   "set title '"+title+"'\n"
   "plot '"+fname+"' using 2:20 w l lw 2 t 'Txx,x' \\\n"
-  "    ,'"+fname+"' using 2:14 w l lw 2 t 'P,x'   \\\n"
-  "    ,'"+fname+"' using 2:7  w l lw 2 t 'Txy'   \\\n"
-  "    ,'"+fname+"' using 2:21 w l lw 2 t 'Txy,x' \\\n"
-  "    ,'"+fname+"' using 2:25 w l lw 2 t 'Txy,y' \\\n"
-  "    ,'"+fname+"' using 2:11 w l lw 2 t 'Gammaxy'\n";
+  "    ,'"+fname+"' using 2:14 w l lw 2 t 'P,x'   \n";
+//  "    ,'"+fname+"' using 2:7  w l lw 2 t 'Txy'   \\\n"
+//  "    ,'"+fname+"' using 2:21 w l lw 2 t 'Txy,x' \\\n"
+//  "    ,'"+fname+"' using 2:25 w l lw 2 t 'Txy,y' \\\n"
+//  "    ,'"+fname+"' using 2:11 w l lw 2 t 'Gammaxy'\n";
 
     gen_gnuplot_script(basename,script);
   }
@@ -447,6 +492,23 @@ struct TPVGammaRecord
     gen_gnuplot_script(basename,script);
   }
 
+  static void viz_normalstress( const std::string& basename, const std::string& title )
+  {
+    const std::string& fname = datafile(basename);
+    std::string script =
+  "set term png\n"
+  "set output '"+basename+".png'\n"
+  "set grid\n"
+  "set key out\n"
+  "set mxtics\n"
+  "set mytics\n"
+  "\n"
+  "set title '"+title+"'\n"
+  "plot '"+fname+"' using 1:($6-$3) w l lw 2 t 'Txx-p' \\\n"
+  "    ,'"+fname+"' using 1:6 w l lw 2 t 'Txx'   \\\n"
+  "    ,'"+fname+"' using 1:3 w l lw 2 t 'P'\n";
+    gen_gnuplot_script(basename,script);
+  }
 };
 
 #endif /* FIELDVISUALIZATION_H_ */

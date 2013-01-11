@@ -223,8 +223,14 @@ private:
         void write_restart_files( const int niter );
         void load_fields_for_postprocessing( const string& fieldfile );
         void viz1( );
-        void horizn_output( const string& base, const string& title, const Float y );
-        void put_fields_on_line( const std::string& basename, SegmentedLine& sline, TPVGammaRecord& r );
+        Postprocessing_FieldsOverLine horizn_output( const string& base, const string& title, const Float y );
+        void put_fields_on_line( SegmentedLine& sline, Postprocessing_FieldsOverLine& r );
+        //wn: width of narrower part of channel, ww: width of plug in wider part of channel
+        bool is_plug_broken( Float& wn, Float& ww );
+        // p & T on symmetry behave like ~xf(y), compute f(y) with a least square method
+        void plot_fp_fT();
+        //ali Feb 2012
+        void dump_matlab( const char* fname );
 
 //	XMLParser*  xmlparam;
 	//parameters params;

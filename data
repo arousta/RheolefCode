@@ -1,6 +1,18 @@
 putza@stir.math.ubc.ca
 rhpu05tza
 
+arousta@bingham.math.ubc.ca
+pel!a23bic
+
 in xml config file:
 -for symxy geometry:
  <subdivisions_top>100</subdivisions_top> creates 50 divison on top of the half geometry
+ 
+for compiling in hermes use find command:
+find . -name *.cpp -exec icpc -c -O3 -I rheolef/ -I externlib/ -I /home/arousta/rhoelef-5.93/intel-11.1/include {} \;
+
+icpc -lrheolef -lcholmod -lcolamd -L/home/arousta/rhoelef-5.93/intel-11.1/lib/ -L/home/arousta/SuiteSparse-3.6.1/intel-11.1/lib *.o -o viscoplasticSolver
+
+
+in example files userman "stokes-cavity2.cc", we should consider blocking of pressure also
+but i don't see any...

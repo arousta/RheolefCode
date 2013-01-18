@@ -18,10 +18,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "solver_wavychannel.h"
+#include "solver_flowonset.h"
 
 #include <iostream>
 #include <cstdlib>
+#include <vector>
 
 using namespace std;
 
@@ -36,12 +37,12 @@ void read_xml( char const* fname );
    \todo 
 		- Handle multiple entries in input files
  */
-int mai(int argc, char**argv)
+int main(int argc, char**argv)
 {
 
 //  print_xml_doc( argc, argv );
 
-  solver_wavychannel solver( argc, argv );
+  solver_flowonset solver( argc, argv );
   solver.solve();
 
   return 1;

@@ -20,7 +20,7 @@
 					<folderInfo id="cdt.managedbuild.config.gnu.exe.debug.1394413973." name="/" resourcePath="">
 						<toolChain id="cdt.managedbuild.toolchain.gnu.exe.debug.738212973" name="Linux GCC" superClass="cdt.managedbuild.toolchain.gnu.exe.debug">
 							<targetPlatform id="cdt.managedbuild.target.gnu.platform.exe.debug.460191698" name="Debug Platform" superClass="cdt.managedbuild.target.gnu.platform.exe.debug"/>
-							<builder buildPath="${workspace_loc:/compile_legacy_rheolef/Debug}" enableAutoBuild="true" id="cdt.managedbuild.target.gnu.builder.exe.debug.1732023010" keepEnvironmentInBuildfile="true" managedBuildOn="true" name="Gnu Make Builder" parallelBuildOn="true" parallelizationNumber="2" superClass="cdt.managedbuild.target.gnu.builder.exe.debug">
+							<builder buildPath="${workspace_loc:/compile_legacy_rheolef/Debug}" enableAutoBuild="true" id="cdt.managedbuild.target.gnu.builder.exe.debug.1732023010" keepEnvironmentInBuildfile="true" managedBuildOn="true" name="Gnu Make Builder" parallelBuildOn="true" parallelizationNumber="optimal" superClass="cdt.managedbuild.target.gnu.builder.exe.debug">
 								<outputEntries>
 									<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="outputPath" name="Debug"/>
 									<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="outputPath" name="Release"/>
@@ -28,7 +28,7 @@
 							</builder>
 							<tool id="cdt.managedbuild.tool.gnu.archiver.base.2064306950" name="GCC Archiver" superClass="cdt.managedbuild.tool.gnu.archiver.base"/>
 							<tool command="g++" id="cdt.managedbuild.tool.gnu.cpp.compiler.exe.debug.866038843" name="GCC C++ Compiler" superClass="cdt.managedbuild.tool.gnu.cpp.compiler.exe.debug">
-								<option id="gnu.cpp.compiler.exe.debug.option.optimization.level.1453702494" name="Optimization Level" superClass="gnu.cpp.compiler.exe.debug.option.optimization.level" value="gnu.cpp.compiler.optimization.level.more" valueType="enumerated"/>
+								<option id="gnu.cpp.compiler.exe.debug.option.optimization.level.1453702494" name="Optimization Level" superClass="gnu.cpp.compiler.exe.debug.option.optimization.level" value="gnu.cpp.compiler.optimization.level.none" valueType="enumerated"/>
 								<option id="gnu.cpp.compiler.exe.debug.option.debugging.level.12361450" name="Debug Level" superClass="gnu.cpp.compiler.exe.debug.option.debugging.level" value="gnu.cpp.compiler.debugging.level.none" valueType="enumerated"/>
 								<option id="gnu.cpp.compiler.option.warnings.allwarn.283807748" name="All warnings (-Wall)" superClass="gnu.cpp.compiler.option.warnings.allwarn" value="false" valueType="boolean"/>
 								<option id="gnu.cpp.compiler.option.include.paths.2021015475" name="Include paths (-I)" superClass="gnu.cpp.compiler.option.include.paths" valueType="includePath">
@@ -128,22 +128,28 @@
 	<storageModule moduleId="cdtBuildSystem" version="4.0.0">
 		<project id="compile_legacy_rheolef.cdt.managedbuild.target.gnu.exe.1870408537" name="Executable" projectType="cdt.managedbuild.target.gnu.exe"/>
 	</storageModule>
-	<storageModule moduleId="refreshScope" versionNumber="1">
-		<resource resourceType="PROJECT" workspacePath="/compile_legacy_rheolef"/>
+	<storageModule moduleId="refreshScope" versionNumber="2">
+		<configuration configurationName="Release">
+			<resource resourceType="PROJECT" workspacePath="/compile_legacy_rheolef"/>
+		</configuration>
+		<configuration configurationName="Debug">
+			<resource resourceType="PROJECT" workspacePath="/compile_legacy_rheolef"/>
+		</configuration>
 	</storageModule>
 	<storageModule moduleId="scannerConfiguration">
 		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
 		<scannerConfigBuildInfo instanceId="cdt.managedbuild.config.gnu.exe.release.583874471;cdt.managedbuild.config.gnu.exe.release.583874471.;cdt.managedbuild.tool.gnu.cpp.compiler.exe.release.1292069030;cdt.managedbuild.tool.gnu.cpp.compiler.input.1116492170">
 			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="org.eclipse.cdt.managedbuilder.core.GCCManagedMakePerProjectProfileCPP"/>
 		</scannerConfigBuildInfo>
-		<scannerConfigBuildInfo instanceId="cdt.managedbuild.config.gnu.exe.release.583874471;cdt.managedbuild.config.gnu.exe.release.583874471.;cdt.managedbuild.tool.gnu.c.compiler.exe.release.146082252;cdt.managedbuild.tool.gnu.c.compiler.input.1582838612">
+		<scannerConfigBuildInfo instanceId="cdt.managedbuild.config.gnu.exe.debug.1394413973;cdt.managedbuild.config.gnu.exe.debug.1394413973.;cdt.managedbuild.tool.gnu.c.compiler.exe.debug.1379935360;cdt.managedbuild.tool.gnu.c.compiler.input.946320824">
 			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="org.eclipse.cdt.managedbuilder.core.GCCManagedMakePerProjectProfileC"/>
 		</scannerConfigBuildInfo>
-		<scannerConfigBuildInfo instanceId="cdt.managedbuild.config.gnu.exe.debug.1394413973;cdt.managedbuild.config.gnu.exe.debug.1394413973.;cdt.managedbuild.tool.gnu.c.compiler.exe.debug.1379935360;cdt.managedbuild.tool.gnu.c.compiler.input.946320824">
+		<scannerConfigBuildInfo instanceId="cdt.managedbuild.config.gnu.exe.release.583874471;cdt.managedbuild.config.gnu.exe.release.583874471.;cdt.managedbuild.tool.gnu.c.compiler.exe.release.146082252;cdt.managedbuild.tool.gnu.c.compiler.input.1582838612">
 			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="org.eclipse.cdt.managedbuilder.core.GCCManagedMakePerProjectProfileC"/>
 		</scannerConfigBuildInfo>
 		<scannerConfigBuildInfo instanceId="cdt.managedbuild.config.gnu.exe.debug.1394413973;cdt.managedbuild.config.gnu.exe.debug.1394413973.;cdt.managedbuild.tool.gnu.cpp.compiler.exe.debug.866038843;cdt.managedbuild.tool.gnu.cpp.compiler.input.596668089">
 			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId="org.eclipse.cdt.managedbuilder.core.GCCManagedMakePerProjectProfileCPP"/>
 		</scannerConfigBuildInfo>
 	</storageModule>
+	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
 </cproject>

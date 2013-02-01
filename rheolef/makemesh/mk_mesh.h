@@ -121,6 +121,8 @@ public:
         //ali 12 Nov
         void bamg_squarechannel( );
         void bamg_trichannel();
+        //ali 25 Jan 2013
+        void bamg_bubblec();
 };
 
 

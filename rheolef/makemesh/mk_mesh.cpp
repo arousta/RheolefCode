@@ -70,6 +70,8 @@ int mk_mesh::bamg_makemesh( )
 	        bamg_squarechannel();
 	else if(meshtype=="trichannel")
 	        bamg_trichannel();
+	else if(meshtype=="bubble_center")
+	        bamg_bubblec();
 	else
 	{
 		cout 	<< "Wrong problem supplied:" << endl
@@ -78,9 +80,135 @@ int mk_mesh::bamg_makemesh( )
 				<< "     - wavychannel" << endl
 				<< "     - ellipsoid" << endl
 				<< "     - squarechannel" << endl
-				<< "     - trichannel"  << endl;
+				<< "     - trichannel"  << endl
+				<< "     - bubble_center"  << endl;
 	}
 	return 1;
+}
+
+
+void mk_mesh::bamg_bubblec()
+{
+  string basename, filename, path, geom;
+  double length, radius, width, hmax;
+  int subdivisions_top, nvertices, nbubble;
+
+  {
+    path_t ppath[] = {"workdir"};
+    get_from_xml(ppath, &path);
+  }
+  {
+    path_t path[] = {"basename"};
+    get_from_xml(path, &basename);
+  }
+  filename = path + "/" + basename;
+
+  {
+    path_t path[] = {"mesh","geom"};
+    get_from_xml(path, &geom);
+  }
+  {
+    path_t path[] = {"mesh","length"};
+    get_from_xml(path, &length);
+  }
+  {
+    path_t path[] = {"mesh","width"};
+    get_from_xml(path,&width);
+  }
+  {
+    path_t path[] = {"mesh","radius"};
+    get_from_xml(path, &radius);
+  }
+  {
+    path_t path[] = {"mesh","subdivisions_top"};
+    get_from_xml(path, &subdivisions_top);
+  }
+  {
+    path_t path[] = {"mesh","hmax"};
+    get_from_xml(path, &hmax);
+  }
+  {
+    path_t path[] = {"mesh","nbubble"};
+    get_from_xml(path, &nbubble);
+  }
+
+
+  cout    << "\n\t\tWorkdir              = " << path << endl
+          << "\n\t\tbasename              = " << basename << endl
+          << "\n\t\tmesh/geom             = " << geom << endl
+          << "\n\t\tmesh/length           = " << length << endl
+          << "\n\t\tmesh/radius        = " << radius << endl
+          << "\n\t\tmesh/hmax             = " << hmax << endl
+          << "\n\t\tmesh/subdivsions_top  = " << subdivisions_top << endl;
+  cout << "...done\n" << endl;
+
+
+  nvertices = 4+nbubble;
+  string bname = filename + "_g.msh";
+  ofstream outf(bname.c_str());
+  outf << "MeshVersionFormatted 0\n"
+          "Dimension 2\n\n"
+          "Vertices " << nvertices
+       << '\n';
+
+  // Starting from top left and going clockwise
+  const Float lhalf(length/2);
+  const Float whalf(width/2);
+  outf << -lhalf << " " <<  whalf << " 1\n";
+  outf <<  lhalf << " " <<  whalf << " 1\n";
+  outf <<  lhalf << " " << -whalf << " 3\n";
+  outf << -lhalf << " " << -whalf << " 3\n";
+
+  const Float dtet(2*pi/nbubble);
+  for(int i=0; i<nbubble; ++i){
+      const Float tet(i*dtet);
+      outf << radius*cos(tet) <<" "<< radius*sin(tet) << " 5\n";
+  }
+
+  //Writing edges
+  outf << "\nEdges " << nvertices << '\n';
+  outf << "1 2 1\n"
+          "2 3 2\n"
+          "3 4 3\n"
+          "4 1 4\n";
+  for(int i=5; i<nbubble+4; ++i){
+      outf << i <<" "<< i+1 << " 5\n";
+  }
+  outf << nbubble+4 << " 5 5\n";
+
+
+  outf << "\nSubDomain 1\n"
+          "2 5 -1 6\n";
+  outf.close();
+
+  cout << "\n\n\nCreate .bamg file " << endl;
+  string command = "bamg ";
+  command += " -g " + bname;
+  command += " -o " + filename + ".bamg";
+  char tmp[100];
+  sprintf(tmp," -hmax %f ",hmax);
+  command.append(tmp);
+  exec_shell(command);
+
+  //create rheolef domain (.dmn) file
+  string dname = filename + ".dmn";
+  outf.open(dname.c_str());
+  outf << "EdgeDomainNames\n"
+          "5\n"
+          "top\n"
+          "right\n"
+          "bottom\n"
+          "left\n"
+          "bubble\n";
+  outf.close();
+
+  // Transform into geo file
+  command = "bamg2geo ";
+  command += filename + ".bamg ";
+  command += filename + ".dmn";
+  command += " > " + filename + ".geo";
+  exec_shell(command);
+
 }
 
 

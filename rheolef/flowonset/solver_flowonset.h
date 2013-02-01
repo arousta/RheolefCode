@@ -231,10 +231,6 @@ private:
         void plot_fp_fT();
         //ali Feb 2012
         void dump_matlab( const char* fname );
-        //ali 15 Jan 2013
-        Float Dp;
-//	XMLParser*  xmlparam;
-	//parameters params;
 
 	int _timestep;
 	Float _timereal;

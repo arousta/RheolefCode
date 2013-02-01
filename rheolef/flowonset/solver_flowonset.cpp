@@ -75,7 +75,6 @@ solver_flowonset::solver_flowonset( int argc, char** argv )
 ,restart_file("restart_info") //ali 24 Oct 2011
 ,uzawa_iter_restart(0)
 ,is_a_restart(false)
-,Dp(.01)
 {
     cout << "\t==========================================\n"
     	 << "\t|Constructor flowonset                   |\n"
@@ -116,14 +115,15 @@ solver_flowonset::solver_flowonset( int argc, char** argv )
 	if (str_subproblem == "onset")
 	{	
             cout << "\t|   Initialise onset problem\n";
-
-            Float dPdL;
-            path_t flow_rate_dpdl_PT[] = {"onset","dPdL"};
-            get_from_xml( flow_rate_dpdl_PT, &dPdL );
-            monitors["dPdL"].push_back(dPdL);
+            {
+              Float P0;
+              path_t flow_rate_dpdl_PT[] = {"onset","startP"};
+              get_from_xml( flow_rate_dpdl_PT, &P0 );
+              monitors["dPdL"].push_back(P0);
+            }
 	}
 
-	cout 	<< "\t|Constructor Wavychennel completed       |\n" 
+	cout 	<< "\t|Constructor flowonset completed         |\n"
 		<< "\t==========================================" << endl << endl;
 }
 
@@ -182,9 +182,9 @@ int solver_flowonset::FE_initialize_spaces()
     string geom;
     //added by ali 15 Jun 2011
     {
-//      path_t path[] = {"mesh","geom"};
-//      get_from_xml(path, &geom);
-      geom = "full";
+      path_t path[] = {"onset","geo"};
+      get_from_xml(path, &geom);
+//      geom = "full";
     }
 
     // Block for boundary conditions
@@ -208,6 +208,7 @@ int solver_flowonset::FE_initialize_spaces()
 	Qh.block("left");
 	//if symxy is used don't block right added by ali for testing
 	Qh.block("right");
+	Qh.block("bubble");
 
         //INFLOW
 	//For testinggg added by ali
@@ -474,16 +475,14 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
 
     multifield tt__h; // temporary field
 	
-    // -----------------------------------------------------------
 
     // ==========================================================
     // Set local parameters from the XML File
     // ==========================================================
-    Float r_Bi, Bn, amplitude, ywall,tol,tolerance;
+    Float r_Bi, Bn, tol, tolerance;
     int iter_uzawa_max;
     bool isflowrate = false;
     string stokes_alg;
-//#    xmlparam->get_childelement_stream("SolverViscoplastic/tolerance") >> tolerance;
     //added by ali 15 Jun 2011
     {
       path_t path[] = {"SolverViscoplastic","augment"};
@@ -504,14 +503,6 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
       get_from_xml(path, &stokes_alg);
     }
     {
-      path_t path[] = {"mesh","height"};
-      get_from_xml(path, &ywall);
-    }
-    {
-      path_t path[] = {"mesh","amplitude"};
-      get_from_xml(path, &amplitude);
-    }
-    {
       path_t path[] = {"SolverViscoplastic","tolerance"};
       get_from_xml(path, &tolerance);
     }
@@ -520,6 +511,16 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
     {
       path_t path[] = {"SolverViscoplastic","nreport"};
       get_from_xml(path,&nreport);
+    }
+    //ali 19 Jan 2013
+    Float Dp, onset_tol;
+    {
+      path_t flow_rate_dpdl_PT[] = {"onset","Pincrement"};
+      get_from_xml( flow_rate_dpdl_PT, &Dp );
+    }
+    {
+      path_t flow_rate_dpdl_PT[] = {"onset","tolerance"};
+      get_from_xml( flow_rate_dpdl_PT, &onset_tol );
     }
 
     //added by ali 7 Jul 2011
@@ -534,110 +535,36 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
      }
      tol = 1.e3;
 
-    //xmlparam->parse_childelement("subproblem")
-    path_t subproblem_PT[] = {"subproblem"};
-    if (path_exist(subproblem_PT) && (0==uzawa_iter_restart) ) //ali 24 Oct 2011
+
+    //Ali 17 Jan 2013
+    bool resetLagMult(false);
     {
-        string subproblem;
-        //added by ali 15 Jun 2011
-//#        xmlparam->get_data_stream() >> subproblem;
-        get_from_xml(subproblem_PT, &subproblem);
-
-        //xmlparam->get_childelement_string("subproblem")
-        std::string str_subproblem;
-        get_from_xml(subproblem_PT, &str_subproblem);
-        if (str_subproblem=="flowrate")
-        {
-                isflowrate=true;
-                // Erase all unnecessary entries from the flowrate and the dPdL entry
-                // in the monitor:
-                if (monitors["dPdL"].size()>2)
-                        monitors["dPdL"].erase(monitors["dPdL"].begin(),monitors["dPdL"].end()-2);
-                if (monitors["flowrate"].size()>2)
-                        monitors["flowrate"].erase(monitors["flowrate"].begin(),monitors["flowrate"].end()-2);
-        }
-        else if (str_subproblem=="pressuredrop")
-                isflowrate=false;
-        else
-                cout << "Uzawa Alg: unknown subproblem" << endl;
-
+      std::string reset;
+      path_t path[] = {"onset","resetLagMult"};
+      get_from_xml(path, &reset);
+      if(reset=="yes")
+        resetLagMult = true;
     }
-    // -----------------------------------------------------------
+    bool enhanceLoop(false);
+    bool flow_onset(false);
 
-	// ==================================================================
-	// Define the Finite element matrices needed for one Uzawa iteration
-	// ==================================================================
-	
-	// 1. Setup of the Stokes problem
-	if ( stokes_alg == "urm_abtbc")	
-		{
-			// Pressure Stabilisation
-			FEforms["c"] =  omega_h.hmin()*form(Qh, Qh , "grad_grad");
-			//std::vector<int>::size_type nrow = c_h.nrow();
+while (!flow_onset){
 
-			cout << "\t|   Stokes Solver: " << stokes_alg << endl
-				 << "\t| \t- Stabilisation term:\n" 
-				 << "\t| \t  (c_h).nrow    = " << FEforms["c"].nrow()    << ", (c_h).col     = " << FEforms["c"].ncol() << endl
-				 << "\t| \t  (c_h.uu).nrow = " << FEforms["c"].uu.nrow() << ", (c_h.uu).col  = " << FEforms["c"].uu.ncol() << endl
-				 << "\t| \t  (c_h.ub).nrow = " << FEforms["c"].ub.nrow() << ", (c_h.ub).col  = " << FEforms["c"].ub.ncol() << endl
-				 << "\t| \t  (c_h.bu).nrow = " << FEforms["c"].bu.nrow() << ", (c_h.bu).col  = " << FEforms["c"].bu.ncol() << endl
-				 << "\t| \t  (c_h.bb).nrow = " << FEforms["c"].bb.nrow() << ", (c_h.bb).col  = " << FEforms["c"].bb.ncol() << endl;
-			//cout << plotmtv << c_h;
-		}
+    if( resetLagMult ){
+      FEfields["T"] =     0*FEfields["T"];
+      FEfields["gamma"] = 0*FEfields["gamma"];
+    }
 
-	// ------------------------------------------------------------------
-
-	// ===========================================================
-	// Analytic Solution
-	// ===========================================================
-	
-	// analytic_solution(amplitude, Bn, ywall , dPdL_current);
-	// plot_fields("Fields before Uzawa iteration");
-	//Ali 17 Jan 2013
-	bool resetLagMult(false);
-        {
-	  std::string reset;
-          path_t path[] = {"onset","resetLagMult"};
-          get_from_xml(path, &reset);
-          if(reset=="yes")
-            resetLagMult = true;
-        }
-	bool riseLoop(true);
-	bool enhanceLoop(false);
-	bool flow_onset(false);
-	Float uplim(0);
-	Float lolim(0);
-	//ali 25 Oct 2011
-	_restart.start_time_monitor();
-	while (!flow_onset){
-    do 
+    do
     {
-//        cout << "\t|   * timestep = " << _timestep
-//			 << ", Adapt # = " << _adaptstep
-//			 << ", Iteration # = " << iter_uzawa << endl;
-        cout << iter_uzawa << ",";
+        if(iter_uzawa!=0)
+          cout << iter_uzawa << ",";
 		multifield oldu(FEfields["u"]);
         // =======================================================
         // Step 1 (Stokes Problem)
         // =======================================================
-//		cout << "\t|     - Step 1 (Stokes Problem)" << endl;
 		int StokesStatus = STOKES_flowrate();
 		
-//      field mrhs__h =	 STOKES_rhs(mf__h,r_Bi,is_flowrate,dPdL_current); // Assemble rhs
-// 		if(false)
-// 		{
-// 			cout << "\t|       Plot mf__h" << endl;
-// 			cout << mayavi << mf__h;
-// 			cout << "\t|       Plot mrhs" << endl;
-// 			cout << mayavi << mrhs__h;
-// 		}
-//         // Use the Uzawa algorithm to solve the system. Use the inverse of A as preconditioner
-//         /// @todo Add selection of different solvers
-//         if ( stokes_alg == "default" || stokes_alg == "Uzawa")
-//             STOKES_Uzawa(mrhs__h);
-// 		else if ( stokes_alg == "urm_abtbc")
-// 			STOKES_urm_abtbc(mrhs__h,FEforms["c"]);
-
 		FEfields["gammadot"] = FEforms["u2shear"]*FEfields["u"];
 		if(((iter_uzawa % FLAG_DEBUG_GRAPH) == 0 && FLAG_DEBUG_GRAPH > 0))
 			{
@@ -648,15 +575,8 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
         // =======================================================
         // Step 2 (Viscoplastic Problem)
         // =======================================================
-//		cout << "\t|     - Step 2 (Viscoplastic Problem): " ;
-        // The use of the temprary stress is propably not optimal,
-        // so it should be removed by implementing a conversion
-        // method in the tensorfield class
-
-		
 		tt__h = FEfields["T"] + r_Bi*FEfields["gammadot"];
 		//added by ali 12/16 Jun 2011
-		//xmlparam->get_childelement_string("SolverViscoplastic/Model")
 		std::string str_SolverViscoplastic_Model;
 		path_t solverVisc_model_PT[] = {"SolverViscoplastic","Model"};
 		get_from_xml( solverVisc_model_PT, &str_SolverViscoplastic_Model );
@@ -681,20 +601,14 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
 				plot_fields("Step 2: new gammadot");
 			}
         
-        // -------------------------------------------------------
 
         // =======================================================
         // Step 3 (Update of Lagrange Mult)
         // =======================================================
-		// Again set analytic solution:
-		//gammadot__h = agamma__h; T__h = aT__h;gamma__h=agamma__h;
-//		cout << "\t|     - Step 3 (Lagrange Mult)" << endl;
 		FEfields["T"] = FEfields["T"] + 
 			r_Bi*(FEfields["gammadot"]-FEfields["gamma"]);
-        // -------------------------------------------------------
 
    
-        // -------------------------------------------------------
 		if( (iter_uzawa % FLAG_DEBUG_GRAPH) == 0 && FLAG_DEBUG_GRAPH > 0)
 			{
 				plot_fields("Field Output after all Uzawa substeps");
@@ -708,72 +622,41 @@ void solver_flowonset::ALG_Uzawa_test( Float Lambda )
 		Float tolu = norm(multifield(FEfields["u"]-oldu),"L2");
 		Float toldgamma = norm(multifield(FEfields["secinv_gamma"]-FEfields["secinv_gammadot"]),"L2");
 		tol = max(tolu,toldgamma);
-		//added by ali 1 Aug 2011
-//		monitors["uL2"].push_back(tolu);
-//		monitors["gL2"].push_back(toldgamma);
 
-		cout<<"\n\t\t    ||u-oldu||_L2           = " << tolu    << endl
-		     << "\t\t    ||gamma-gammadot||_L2   = " << toldgamma << endl;
-		cout << "\tIterations #= ";
+		cout  <<"\n\t\t    ||u-oldu||_L2           = " << tolu
+		     << "\n\t\t    ||gamma-gammadot||_L2   = " << toldgamma << endl;
+                if(tolerance<tol)
+                  cout << "\tIterations #= ";
 		  }
 		iter_uzawa++;
     } while(iter_uzawa<=iter_uzawa_max && tol > tolerance);
 
 
-//    if( _restart.time_to_save_for_restart() )
-//    {
-//        write_restart_files(iter_uzawa+1);
-//    }
     //ali 15 Jan 2013
     iter_uzawa = 0;
     FEfields["secinv_gamma"]=secinv(FEfields["gamma"]);
     const Float secnorm = rheolef::norm(FEfields["secinv_gamma"]);
     const bool zero_sec = (secnorm==0);
     Float curdPdL = monitors["dPdL"].back();
-    if (riseLoop)
-    {
-      if (zero_sec) {
-          curdPdL *= 4;
-          cout <<"\nIncreasing pressure drop to "<<curdPdL<<"\n"<<endl;
-          monitors["dPdL"].push_back(curdPdL);
-      }
-      else { // this happens once only
-          cout <<"Onset detected......, switching to enhanced resolution loop....."<<"\n"<<endl;
-          riseLoop = false;
+    if(enhanceLoop){
+      Dp /= 2;
+      if(Dp<=onset_tol)
+        flow_onset = true;
+    }
+    if( zero_sec ){
+        monitors["dPdL"].push_back(curdPdL+Dp);
+    }
+    else {
+        if(!enhanceLoop){ // runs only once
           enhanceLoop = true;
-
-          uplim = curdPdL;
-          lolim = *(monitors["dPdL"].end()-2);
-          cout << "\t UPlimit= " << uplim;
-          cout << ",  LOlimit= " << lolim;
-          cout << endl;
-          monitors["dPdL"].push_back( (uplim+lolim)/2 );
-      }
-    }
-    else if (enhanceLoop)
-    {
-        if (zero_sec)
-          lolim = curdPdL;
-        else
-          uplim = curdPdL;
-        if( abs(uplim-lolim)<=1E-4 ){
-          cout << "Onset pressure drop converged-----------------" << endl;
-          flow_onset = true;
+          Dp /= 2;
         }
-        monitors["dPdL"].push_back( (uplim+lolim)/2 );
-        cout << "Setting dPdL: ========================( " << monitors["dPdL"].back() << " )" << endl;
+        monitors["dPdL"].push_back(curdPdL-Dp);
     }
-    if( resetLagMult ){
-      FEfields["T"] =     0*FEfields["T"];
-      FEfields["gamma"] = 0*FEfields["gamma"];
-    }
-//    flow_onset = true;
-	}
-
-
-
-	
-//      plot_fields("Field Output after all Uzawa steps");
+    if(Dp==0)
+      flow_onset = true;
+    cout << "Setting dPdL: ========================( " << monitors["dPdL"].back() << " )" << endl;
+}
 }
 
 /*!
@@ -924,39 +807,8 @@ int solver_flowonset::FE_initialize()
  */
 int solver_flowonset::STOKES_flowrate()
 {
-	int iter=0, itermax;
-	Float tol, target_flowrate, length, tmp;
-	bool convergence=true;
-	
-//	cout	<< "\t\t\t Flowrate Solver" << endl;
-    //added by ali 12 Jun 2011
-//#    xmlparam->get_childelement_stream("flowrate/target")    >> target_flowrate;
-//#    xmlparam->get_childelement_stream("flowrate/maxsteps")  >> itermax;
-//#    xmlparam->get_childelement_stream("flowrate/tolerance") >> tol;
-//#    xmlparam->get_childelement_stream("mesh/length") >> length;
-        //added by ali 15 Jun 2011
-	{
-	  path_t path[] = {"flowrate","target"};
-	  get_from_xml(path, &target_flowrate);
-	}
-	{
-//	  path_t path[] = {"flowrate","maxsteps"};
-//	  get_from_xml(path, &itermax);
-	  itermax = 0;
-	}
-	{
-	  path_t path[] = {"flowrate","tolerance"};
-	  get_from_xml(path, &tol);
-	}
-	{
-	  path_t path[] = {"mesh","length"};
-	  get_from_xml(path, &length);
-	}
-	
 	field tmpfield;
-
 	//added by ali 15 Jun 2011
-	//xmlparam->get_childelement_string("SolverViscoplastic/type")
 	std::string str_SolverViscoplastic_type;
 	path_t solverVisc_type_PT[] = {"SolverViscoplastic","type"};
 	get_from_xml( solverVisc_type_PT, &str_SolverViscoplastic_type );
@@ -965,84 +817,23 @@ int solver_flowonset::STOKES_flowrate()
 		{
 			Float r_Bi;
 			//added by ali 12 Jun 2011
-//#			xmlparam->get_childelement_stream("SolverViscoplastic/augment") >> r_Bi;
 			path_t solverVisc_aug_PT[] = {"SolverViscoplastic","augment"};
 			get_from_xml( solverVisc_aug_PT, &r_Bi );
 
 			tmpfield =  0.5*FEforms["DIV_ThVh"]*(FEfields["T"]-1*r_Bi*FEfields["gamma"]);
 		}
 
-//	do
-//	{
-		// Solve the Stokes problem:
-//		cout	<<"\t\t\t   - Flowrate step " << iter
-//				<<" of " << itermax << endl;
-		
 		// Calculate the right hand side of the problem:
 		field forcefield = *(monitors["dPdL"].end()-1)*FEfields["mf"];
 		if (str_SolverViscoplastic_type == "Uzawa" )
 			forcefield = forcefield + tmpfield;
 
 		//added by ali 12/15 Jun 2011
-		//xmlparam->get_childelement_string("StokesSolver/type")
 		path_t stokes_type_PT[] = {"StokesSolver","type"};
 		std::string str_StokesSolver_type;
 		if (get_string(stokes_type_PT) == "Uzawa" )
 			STOKES_Uzawa( forcefield );
 
-		// Calculate the flowrate
-//		monitors["flowrate"].push_back(flowrate(FEfields["u"],FEfields["f"],FEforms["m"],1/length));
-		
-		// Setup of the secant method if itermax > 0
-		// Check for double entries:
-		if (itermax > 0)
-		{
-			if ( *(monitors["flowrate"].end()-1) == *(monitors["flowrate"].end()-2))
-			{
-				cout << "\t\t\t    Remove identical flowrate " << endl;
-				monitors["flowrate"].pop_back();
-			}
-			if ( *(monitors["dPdL"].end()-1) == *(monitors["dPdL"].end()-2))
-			{
-				cout << "\t\t\t    Remove identical pressure " << endl;
-				monitors["dPdL"].pop_back();
-			}
-		
-	// 		if ( abs(*(monitors["flowrate"].end()-1)-target_flowrate) <= tol )
-	// 		{
-	// 			cout << "\t\t\t    Convergence for the flowrate achieved " << endl;
-	// 		}
-	// 		else
-	// 		{
-				tmp = *(monitors["dPdL"].end()-1) 
-				-( *(monitors["flowrate"].end()-1)-target_flowrate)*
-					( *(monitors["dPdL"].end()-1) - *(monitors["dPdL"].end()-2) )/
-					( *(monitors["flowrate"].end()-1) - *(monitors["flowrate"].end()-2));
-				monitors["dPdL"].push_back(tmp);
-				cout << "\t\t\t    Secant Step" << endl;
-	// 		}
-			
-	
-	
-			// Calculate and print the residual
-			tmp = abs( *(monitors["flowrate"].end()-1)-target_flowrate);
-			cout << "\t\t\t    |F^n-target| = " << tmp
-				<<  ", |F^n-F^(n-1)| = "  << abs(*(monitors["flowrate"].end()-1)-*(monitors["flowrate"].end()-2))
-				<<  ", flowrate = "  << *(monitors["flowrate"].end()-1)
-				<< endl;
-			cout << "\t\t\t    new pressure = " << *(monitors["dPdL"].end()-1)
-				<<  ", old pressure = "  << *(monitors["dPdL"].end()-2)
-				<<  ", deltap   = "  << abs(*(monitors["dPdL"].end()-1)-*(monitors["dPdL"].end()-2))
-				<< endl;
-		}
-		else
-		{
-//			cout << "\t\t\t    Constant pressure problem: F^n = " << *(monitors["flowrate"].end()-1) << endl;
-		}
-		iter++;
-		//plot_fields("Flowfields inside flowrate calculation");
-//	}while(   iter<=itermax && convergence );
-assert_macro(iter==1,"Stokes flow should take one iteration!");
 	return 1;
 }
 
